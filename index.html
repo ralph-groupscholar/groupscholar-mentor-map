@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Group Scholar Mentor Map</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <div class="orbital"></div>
+      <header class="hero">
+        <div class="hero-content">
+          <p class="eyebrow">Group Scholar Mentor Map</p>
+          <h1>Match mentors with scholars. Track capacity. Protect equity.</h1>
+          <p class="lede">
+            A local-first mentor matching studio that blends expertise coverage, availability,
+            and fairness signals into one decisive dashboard.
+          </p>
+          <div class="hero-actions">
+            <button class="primary" id="generate-matches">Generate matches</button>
+            <button class="ghost" id="auto-assign">Auto-assign best fits</button>
+          </div>
+        </div>
+        <section class="stats" id="headline-metrics"></section>
+      </header>
+
+    <main>
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Mentor roster</h2>
+            <p>Track expertise, capacity, and active assignments.</p>
+          </div>
+          <div class="panel-body" id="mentor-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Scholar intake</h2>
+            <p>Capture needs, urgency, and intensity for smarter matching.</p>
+          </div>
+          <div class="panel-body" id="scholar-list"></div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Matching studio</h2>
+            <p>Top recommendations and quick assignments.</p>
+          </div>
+          <div class="panel-body" id="match-list"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Capacity & fairness</h2>
+            <p>Spot overload risk, uneven distribution, and coverage gaps.</p>
+          </div>
+          <div class="panel-body" id="signal-board"></div>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Add mentor</h2>
+            <p>Keep the network fresh with new expertise.</p>
+          </div>
+          <form class="panel-body form" id="mentor-form">
+            <div>
+              <label for="mentor-name">Name</label>
+              <input id="mentor-name" name="name" placeholder="Avery Chen" required />
+            </div>
+            <div>
+              <label for="mentor-role">Role</label>
+              <input id="mentor-role" name="role" placeholder="Data Science Lead" />
+            </div>
+            <div>
+              <label for="mentor-tags">Expertise tags</label>
+              <input
+                id="mentor-tags"
+                name="tags"
+                placeholder="AI, scholarships, leadership"
+                required
+              />
+            </div>
+            <div class="inline">
+              <div>
+                <label for="mentor-availability">Availability (hrs/week)</label>
+                <input
+                  id="mentor-availability"
+                  name="availability"
+                  type="number"
+                  min="1"
+                  max="20"
+                  value="4"
+                />
+              </div>
+              <div>
+                <label for="mentor-capacity">Capacity (mentees)</label>
+                <input id="mentor-capacity" name="capacity" type="number" min="1" max="8" value="3" />
+              </div>
+            </div>
+            <div class="inline">
+              <div>
+                <label for="mentor-timezone">Timezone</label>
+                <input id="mentor-timezone" name="timezone" placeholder="ET" />
+              </div>
+              <div>
+                <label for="mentor-notes">Notes</label>
+                <input id="mentor-notes" name="notes" placeholder="Interested in first-gen support" />
+              </div>
+            </div>
+            <button class="primary" type="submit">Add mentor</button>
+          </form>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Add scholar</h2>
+            <p>Capture focus areas to accelerate matching.</p>
+          </div>
+          <form class="panel-body form" id="scholar-form">
+            <div>
+              <label for="scholar-name">Name</label>
+              <input id="scholar-name" name="name" placeholder="Jordan Alvarez" required />
+            </div>
+            <div>
+              <label for="scholar-cohort">Cohort</label>
+              <input id="scholar-cohort" name="cohort" placeholder="Spring 2026" />
+            </div>
+            <div>
+              <label for="scholar-needs">Needs tags</label>
+              <input
+                id="scholar-needs"
+                name="needs"
+                placeholder="STEM, interviews, scholarships"
+                required
+              />
+            </div>
+            <div class="inline">
+              <div>
+                <label for="scholar-intensity">Mentoring intensity (hrs/week)</label>
+                <input id="scholar-intensity" name="intensity" type="number" min="1" max="12" value="3" />
+              </div>
+              <div>
+                <label for="scholar-urgency">Urgency (1-5)</label>
+                <input id="scholar-urgency" name="urgency" type="number" min="1" max="5" value="3" />
+              </div>
+            </div>
+            <div class="inline">
+              <div>
+                <label for="scholar-timezone">Timezone</label>
+                <input id="scholar-timezone" name="timezone" placeholder="ET" />
+              </div>
+              <div>
+                <label for="scholar-notes">Notes</label>
+                <input id="scholar-notes" name="notes" placeholder="Needs mock interviews" />
+              </div>
+            </div>
+            <button class="primary" type="submit">Add scholar</button>
+          </form>
+        </article>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Data relay</h2>
+            <p>Export or import matching data for collaboration.</p>
+          </div>
+          <div class="panel-body">
+            <div class="data-actions">
+              <button class="ghost" id="export-json">Export JSON</button>
+              <label class="ghost file-label">
+                Import JSON
+                <input type="file" id="import-json" accept="application/json" />
+              </label>
+              <button class="ghost" id="reset-data">Reset sample data</button>
+            </div>
+            <pre id="json-preview"></pre>
+          </div>
+        </article>
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Matching notes</h2>
+            <p>Use this space to capture decisions and follow-ups.</p>
+          </div>
+          <div class="panel-body">
+            <textarea id="notes" placeholder="Capture follow-up tasks, next touchpoints, and risks."></textarea>
+          </div>
+        </article>
+      </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
