@@ -16,6 +16,8 @@ const elements = {
   signalBoard: document.getElementById("signal-board"),
   cohortBoard: document.getElementById("cohort-board"),
   engagementPlan: document.getElementById("engagement-plan"),
+  actionQueue: document.getElementById("action-queue"),
+  coverageBoard: document.getElementById("coverage-board"),
   headlineMetrics: document.getElementById("headline-metrics"),
   generateMatches: document.getElementById("generate-matches"),
   autoAssign: document.getElementById("auto-assign"),
@@ -192,6 +194,8 @@ const buildRationale = (mentor, scholar) => {
     `Slots left: ${remainingSlots} · Hours left: ${remainingHours}`,
   ];
 };
+
+const getMentorById = (mentorId) => state.mentors.find((mentor) => mentor.id === mentorId);
 
 const renderMentors = () => {
   elements.mentorList.innerHTML = "";
@@ -474,7 +478,7 @@ const renderCohortBoard = () => {
   elements.cohortBoard.innerHTML = "";
 
   if (!state.scholars.length) {
-    elements.cohortBoard.innerHTML = "<p>Add scholars to see cohort coverage.</p>";
+    elements.cohortBoard.innerHTML = "<p>Add scholars to view cohort coverage.</p>";
     return;
   }
 
@@ -483,83 +487,98 @@ const renderCohortBoard = () => {
     if (!acc[cohort]) {
       acc[cohort] = {
         scholars: [],
+        assigned: 0,
+        unassigned: 0,
+        hours: 0,
+        urgencyTotal: 0,
+        mentors: new Set(),
+        needs: {},
       };
     }
     acc[cohort].scholars.push(scholar);
+    acc[cohort].hours += scholar.intensity || 0;
+    acc[cohort].urgencyTotal += scholar.urgency || 0;
+    (scholar.needs || []).forEach((need) => {
+      acc[cohort].needs[need] = (acc[cohort].needs[need] || 0) + 1;
+    });
+
+    const assignedMentorId = state.assignments[scholar.id];
+    if (assignedMentorId) {
+      acc[cohort].assigned += 1;
+      acc[cohort].mentors.add(assignedMentorId);
+    } else {
+      acc[cohort].unassigned += 1;
+    }
     return acc;
   }, {});
 
   const list = document.createElement("div");
   list.className = "list";
 
-  Object.entries(cohortMap).forEach(([cohort, data]) => {
-    const cohortScholars = data.scholars;
-    const assignedScholars = cohortScholars.filter((scholar) => state.assignments[scholar.id]);
-    const unassignedCount = cohortScholars.length - assignedScholars.length;
-    const coverage = cohortScholars.length
-      ? Math.round((assignedScholars.length / cohortScholars.length) * 100)
+  const cohortEntries = Object.entries(cohortMap).sort((a, b) => {
+    const riskDiff = b[1].unassigned - a[1].unassigned;
+    if (riskDiff !== 0) return riskDiff;
+    const urgencyA = a[1].urgencyTotal / a[1].scholars.length;
+    const urgencyB = b[1].urgencyTotal / b[1].scholars.length;
+    return urgencyB - urgencyA;
+  });
+
+  cohortEntries.forEach(([cohort, data]) => {
+    const coverage = data.scholars.length
+      ? Math.round((data.assigned / data.scholars.length) * 100)
       : 0;
-    const avgUrgency = cohortScholars.length
-      ? (
-          cohortScholars.reduce((sum, scholar) => sum + (scholar.urgency || 0), 0) /
-          cohortScholars.length
-        ).toFixed(1)
+    const avgUrgency = data.scholars.length
+      ? (data.urgencyTotal / data.scholars.length).toFixed(1)
       : "–";
-    const avgIntensity = cohortScholars.length
-      ? (
-          cohortScholars.reduce((sum, scholar) => sum + (scholar.intensity || 0), 0) /
-          cohortScholars.length
-        ).toFixed(1)
+    const avgIntensity = data.scholars.length
+      ? (data.hours / data.scholars.length).toFixed(1)
       : "–";
-    const needsCount = cohortScholars
-      .filter((scholar) => !state.assignments[scholar.id])
-      .reduce((acc, scholar) => {
-        (scholar.needs || []).forEach((need) => {
-          acc[need] = (acc[need] || 0) + 1;
-        });
-        return acc;
-      }, {});
-    const topNeed = Object.entries(needsCount)
+    const mentorNames = Array.from(data.mentors)
+      .map((mentorId) => getMentorById(mentorId))
+      .filter(Boolean)
+      .map((mentor) => mentor.name);
+    const mentorCoverage = mentorNames.length ? mentorNames.join(", ") : "None yet";
+    const topNeeds = Object.entries(data.needs)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 1)
+      .slice(0, 3)
       .map(([need, count]) => `${need} (${count})`)
       .join(", ");
-    const uniqueMentors = new Set(
-      assignedScholars
-        .map((scholar) => state.assignments[scholar.id])
-        .filter(Boolean)
-    ).size;
+    const riskFlags = [];
 
-    const status =
-      unassignedCount === 0 && Number(avgUrgency) <= 3
-        ? "Stable"
-        : unassignedCount / cohortScholars.length > 0.3 || Number(avgUrgency) >= 4
-          ? "High risk"
-          : "Watch";
-
-    const action =
-      unassignedCount === 0
-        ? "Keep cadence steady; reinforce momentum."
-        : topNeed
-          ? `Recruit mentors for ${topNeed}.`
-          : "Assign mentors and confirm kickoff timing.";
+    if (coverage < 60) {
+      riskFlags.push("Low coverage");
+    }
+    if (data.unassigned > 0) {
+      riskFlags.push(`${data.unassigned} unassigned`);
+    }
+    if (data.scholars.length && data.urgencyTotal / data.scholars.length >= 4) {
+      riskFlags.push("High urgency");
+    }
+    if (mentorNames.length <= 1 && data.scholars.length > 2) {
+      riskFlags.push("Mentor concentration");
+    }
 
     const card = document.createElement("div");
     card.className = "card";
     card.innerHTML = `
       <div class="card-header">
         <h3>${cohort}</h3>
-        <span class="badge">${status}</span>
+        <span class="badge">Coverage ${coverage}%</span>
       </div>
       <div class="signal">
-        <strong>${coverage}% covered</strong>
-        <span>${unassignedCount} unassigned · ${uniqueMentors} active mentors</span>
+        <strong>${data.scholars.length} scholars · ${data.hours} hrs demand</strong>
+        <span>Avg urgency ${avgUrgency} · ${data.assigned} assigned</span>
       </div>
       <div class="signal">
-        <strong>Avg urgency ${avgUrgency}</strong>
-        <span>Avg intensity ${avgIntensity} hrs/week</span>
+        <strong>Avg intensity ${avgIntensity} hrs/week</strong>
+        <span>Mentors: ${mentorCoverage}</span>
       </div>
-      <p class="muted">Next action: ${action}</p>
+      <p><strong>Top needs:</strong> ${topNeeds || "All covered"}</p>
+      ${
+        riskFlags.length
+          ? `<div class="alert">Risks: ${riskFlags.join(", ")}</div>`
+          : `<div class="alert">Coverage stable. Keep momentum.</div>`
+      }
     `;
     list.appendChild(card);
   });
@@ -650,6 +669,238 @@ const renderEngagementPlan = () => {
   elements.engagementPlan.appendChild(list);
 };
 
+const renderActionQueue = () => {
+  elements.actionQueue.innerHTML = "";
+
+  if (!state.mentors.length && !state.scholars.length) {
+    elements.actionQueue.innerHTML = "<p>Add mentors and scholars to see action items.</p>";
+    return;
+  }
+
+  const actions = [];
+  const assignedCount = Object.keys(state.assignments).length;
+
+  state.scholars.forEach((scholar) => {
+    if (state.assignments[scholar.id]) return;
+    const priority = (scholar.urgency || 1) * 2 + (scholar.intensity || 0);
+    actions.push({
+      title: `Assign mentor for ${scholar.name}`,
+      detail: `Urgency ${scholar.urgency || "–"} · ${scholar.intensity || 0} hrs/week · ${
+        scholar.cohort || "Cohort TBD"
+      }`,
+      priority,
+      tone: priority >= 10 ? "High" : priority >= 6 ? "Medium" : "Low",
+    });
+  });
+
+  state.mentors.forEach((mentor) => {
+    const overCapacity = getMentorLoadCount(mentor.id) - getMentorCapacity(mentor);
+    if (overCapacity > 0) {
+      actions.push({
+        title: `Rebalance ${mentor.name}'s load`,
+        detail: `Over capacity by ${overCapacity} mentee${overCapacity === 1 ? "" : "s"}.`,
+        priority: 9 + overCapacity,
+        tone: "High",
+      });
+    }
+    const availability = getMentorAvailability(mentor);
+    const hourDelta = getMentorLoadHours(mentor.id) - availability;
+    if (availability && hourDelta > 0) {
+      actions.push({
+        title: `Reduce hours for ${mentor.name}`,
+        detail: `${hourDelta} hrs/week above availability.`,
+        priority: 8 + Math.ceil(hourDelta / 2),
+        tone: "High",
+      });
+    }
+  });
+
+  const unmetNeeds = state.scholars
+    .filter((scholar) => !state.assignments[scholar.id])
+    .reduce((acc, scholar) => {
+      (scholar.needs || []).forEach((need) => {
+        acc[need] = (acc[need] || 0) + 1;
+      });
+      return acc;
+    }, {});
+
+  Object.entries(unmetNeeds).forEach(([need, count]) => {
+    if (count < 2) return;
+    actions.push({
+      title: `Recruit mentors for ${need}`,
+      detail: `${count} unassigned scholars need this expertise.`,
+      priority: 6 + count,
+      tone: count >= 4 ? "High" : "Medium",
+    });
+  });
+
+  const cohortRisk = state.scholars
+    .filter((scholar) => !state.assignments[scholar.id])
+    .reduce((acc, scholar) => {
+      const cohort = scholar.cohort || "Unassigned cohort";
+      acc[cohort] = (acc[cohort] || 0) + 1;
+      return acc;
+    }, {});
+
+  Object.entries(cohortRisk).forEach(([cohort, count]) => {
+    if (count < 2) return;
+    actions.push({
+      title: `Stabilize ${cohort} coverage`,
+      detail: `${count} scholars waiting for assignment.`,
+      priority: 5 + count,
+      tone: count >= 3 ? "High" : "Medium",
+    });
+  });
+
+  if (!actions.length) {
+    elements.actionQueue.innerHTML = "<p>All clear. No urgent actions detected.</p>";
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "list";
+
+  actions
+    .sort((a, b) => b.priority - a.priority)
+    .slice(0, Math.max(6, assignedCount ? 6 : 4))
+    .forEach((action, index) => {
+      const card = document.createElement("div");
+      card.className = "card action-card";
+      card.innerHTML = `
+        <div class="card-header">
+          <h3>${index + 1}. ${action.title}</h3>
+          <span class="badge">${action.tone}</span>
+        </div>
+        <p class="muted">${action.detail}</p>
+      `;
+      list.appendChild(card);
+    });
+
+  elements.actionQueue.appendChild(list);
+};
+
+const renderCoverageBoard = () => {
+  elements.coverageBoard.innerHTML = "";
+
+  if (!state.mentors.length && !state.scholars.length) {
+    elements.coverageBoard.innerHTML = "<p>Add mentors and scholars to see coverage balance.</p>";
+    return;
+  }
+
+  const timezoneStats = {};
+  state.scholars.forEach((scholar) => {
+    const zone = scholar.timezone || "Timezone TBD";
+    if (!timezoneStats[zone]) {
+      timezoneStats[zone] = { scholars: 0, mentors: 0 };
+    }
+    timezoneStats[zone].scholars += 1;
+  });
+  state.mentors.forEach((mentor) => {
+    const zone = mentor.timezone || "Timezone TBD";
+    if (!timezoneStats[zone]) {
+      timezoneStats[zone] = { scholars: 0, mentors: 0 };
+    }
+    timezoneStats[zone].mentors += 1;
+  });
+
+  const timezoneRows = Object.entries(timezoneStats)
+    .sort((a, b) => b[1].scholars - a[1].scholars)
+    .slice(0, 5)
+    .map(([zone, data]) => {
+      const coverage = data.scholars
+        ? Math.round((data.mentors / data.scholars) * 100)
+        : data.mentors
+        ? 100
+        : 0;
+      return `
+        <div class="coverage-item">
+          <span>${zone}</span>
+          <strong>${data.mentors} mentors · ${data.scholars} scholars</strong>
+          <span class="muted">Coverage ${coverage}%</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  const needCounts = state.scholars.reduce((acc, scholar) => {
+    (scholar.needs || []).forEach((need) => {
+      acc[need] = (acc[need] || 0) + 1;
+    });
+    return acc;
+  }, {});
+
+  const mentorCoverage = state.mentors.reduce((acc, mentor) => {
+    (mentor.tags || []).forEach((tag) => {
+      acc[tag] = (acc[tag] || 0) + 1;
+    });
+    return acc;
+  }, {});
+
+  const expertiseRows = Object.entries(needCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([need, demand]) => {
+      const bench = mentorCoverage[need] || 0;
+      const coverage = demand ? Math.round((bench / demand) * 100) : 0;
+      const status =
+        bench === 0 ? "Gap" : coverage >= 100 ? "Healthy" : coverage >= 60 ? "Watch" : "Thin";
+      return `
+        <div class="coverage-item">
+          <span>${need}</span>
+          <strong>${bench} mentors · ${demand} scholars</strong>
+          <span class="muted">Coverage ${coverage}% · ${status}</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  const totalAvailability = state.mentors.reduce(
+    (sum, mentor) => sum + (getMentorAvailability(mentor) || 0),
+    0
+  );
+  const totalDemand = state.scholars.reduce((sum, scholar) => sum + (scholar.intensity || 0), 0);
+  const runway = totalAvailability - totalDemand;
+  const runwayLabel =
+    runway >= 6 ? "Surplus" : runway >= 0 ? "Balanced" : runway >= -4 ? "Tight" : "Overdrawn";
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `
+    <div class="coverage-grid">
+      <div class="coverage-block">
+        <h4>Timezone balance</h4>
+        <div class="coverage-list">
+          ${timezoneRows || "<p class=\"muted\">No timezone data yet.</p>"}
+        </div>
+      </div>
+      <div class="coverage-block">
+        <h4>Expertise coverage</h4>
+        <div class="coverage-list">
+          ${expertiseRows || "<p class=\"muted\">No expertise needs captured.</p>"}
+        </div>
+      </div>
+      <div class="coverage-block">
+        <h4>Hours runway</h4>
+        <div class="coverage-metric">
+          <div>
+            <span class="muted">Available hours</span>
+            <strong>${totalAvailability}</strong>
+          </div>
+          <div>
+            <span class="muted">Scholar demand</span>
+            <strong>${totalDemand}</strong>
+          </div>
+          <div>
+            <span class="muted">Runway</span>
+            <strong>${runway} hrs · ${runwayLabel}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  elements.coverageBoard.appendChild(card);
+};
+
 const renderMetrics = () => {
   const assignedCount = Object.keys(state.assignments).length;
   const coverageRatio = state.scholars.length
@@ -686,6 +937,8 @@ const renderAll = () => {
   renderSignals();
   renderCohortBoard();
   renderEngagementPlan();
+  renderActionQueue();
+  renderCoverageBoard();
   renderMetrics();
   renderPreview();
 };

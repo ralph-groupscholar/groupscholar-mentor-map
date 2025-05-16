@@ -19,4 +19,12 @@
 - Fixed the high-urgency unassigned signal rendering and aligned plan styling with the existing system.
 
 ## Iteration 4
+- Expanded the cohort coverage panel with demand hours, mentor concentration, top needs, and risk flags.
+- Added cohort-level sorting to surface the highest coverage risk first.
+
+## Iteration 4
+- Added an action queue panel that prioritizes coverage, capacity, and cohort stabilization moves.
+- Wired action scoring to urgency, intensity, overload, and unmet need signals for fast triage.
+
+## Iteration 4
 - Added a cohort coverage board with coverage %, urgency/intensity averages, mentor counts, and next-step actions per cohort.
