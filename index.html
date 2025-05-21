@@ -213,6 +213,27 @@
               </label>
               <button class="ghost" id="reset-data">Reset sample data</button>
             </div>
+            <div class="sync-actions">
+              <div>
+                <h3>Cloud snapshot</h3>
+                <p class="muted">Push or pull the latest shared matching state.</p>
+              </div>
+              <div class="sync-buttons">
+                <button class="primary" id="save-cloud">Save to cloud</button>
+                <button class="ghost" id="load-cloud">Load from cloud</button>
+              </div>
+              <p class="sync-status" id="sync-status">Cloud sync not connected yet.</p>
+            </div>
+            <div class="snapshot-history">
+              <div class="snapshot-header">
+                <div>
+                  <h3>Snapshot history</h3>
+                  <p class="muted">Restore prior mentor matching states in seconds.</p>
+                </div>
+                <button class="ghost" id="refresh-history">Refresh history</button>
+              </div>
+              <div id="snapshot-list"></div>
+            </div>
             <pre id="json-preview"></pre>
           </div>
         </article>

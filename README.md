@@ -9,6 +9,8 @@ A local-first mentor matching studio for Group Scholar teams to manage mentor ca
 - Capacity and fairness signals covering overload risk, coverage gaps, and distribution balance
 - Engagement plan panel with cadence recommendations, kickoff timing, and risk flags
 - Local-first JSON export/import plus notes capture for coordination
+- Cloud snapshot sync backed by PostgreSQL for shared matching state
 
 ## Tech
-- HTML, CSS, and vanilla JavaScript (local-first, no backend)
+- HTML, CSS, and vanilla JavaScript
+- Vercel serverless functions with PostgreSQL (pg)

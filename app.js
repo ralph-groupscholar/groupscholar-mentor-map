@@ -5,7 +5,10 @@ const state = {
   scholars: [],
   assignments: {},
   notes: "",
+  lastSyncedAt: null,
 };
+
+const CLOUD_ENDPOINT = "/api/cloud";
 
 const elements = {
   mentorForm: document.getElementById("mentor-form"),
@@ -24,6 +27,9 @@ const elements = {
   exportJson: document.getElementById("export-json"),
   importJson: document.getElementById("import-json"),
   resetData: document.getElementById("reset-data"),
+  saveCloud: document.getElementById("save-cloud"),
+  loadCloud: document.getElementById("load-cloud"),
+  syncStatus: document.getElementById("sync-status"),
   jsonPreview: document.getElementById("json-preview"),
   notes: document.getElementById("notes"),
 };
@@ -107,25 +113,33 @@ const saveState = () => {
   localStorage.setItem(storageKey, JSON.stringify(state));
 };
 
+const ingestState = (parsed) => {
+  state.mentors = (parsed.mentors || []).map((mentor) => ({
+    ...mentor,
+    tags: mentor.tags || mentor.expertise || [],
+    availability: Number(mentor.availability) || 0,
+    capacity: Number(mentor.capacity) || 0,
+  }));
+  state.scholars = (parsed.scholars || []).map((scholar) => ({
+    ...scholar,
+    needs: scholar.needs || scholar.interests || [],
+    intensity: Number(scholar.intensity) || 0,
+    urgency: Number(scholar.urgency) || 1,
+  }));
+  state.assignments = parsed.assignments || {};
+  state.notes = parsed.notes || "";
+  state.lastSyncedAt = parsed.lastSyncedAt || null;
+  if (elements.notes) {
+    elements.notes.value = state.notes;
+  }
+};
+
 const loadState = () => {
   const stored = localStorage.getItem(storageKey);
   if (!stored) return;
   try {
     const parsed = JSON.parse(stored);
-    state.mentors = (parsed.mentors || []).map((mentor) => ({
-      ...mentor,
-      tags: mentor.tags || mentor.expertise || [],
-      availability: Number(mentor.availability) || 0,
-      capacity: Number(mentor.capacity) || 0,
-    }));
-    state.scholars = (parsed.scholars || []).map((scholar) => ({
-      ...scholar,
-      needs: scholar.needs || scholar.interests || [],
-      intensity: Number(scholar.intensity) || 0,
-      urgency: Number(scholar.urgency) || 1,
-    }));
-    state.assignments = parsed.assignments || {};
-    state.notes = parsed.notes || "";
+    ingestState(parsed);
   } catch (error) {
     console.warn("Failed to parse stored data", error);
   }
@@ -930,6 +944,15 @@ const renderPreview = () => {
   elements.jsonPreview.textContent = JSON.stringify(state, null, 2);
 };
 
+const setSyncStatus = (message, tone = "neutral") => {
+  if (!elements.syncStatus) return;
+  elements.syncStatus.textContent = message;
+  elements.syncStatus.classList.remove("is-error", "is-success", "is-loading");
+  if (tone !== "neutral") {
+    elements.syncStatus.classList.add(`is-${tone}`);
+  }
+};
+
 const renderAll = () => {
   renderMentors();
   renderScholars();
@@ -992,6 +1015,7 @@ const seedSampleData = () => {
   state.scholars = sampleData.scholars.map((scholar) => ({ ...scholar }));
   state.assignments = { ...sampleData.assignments };
   state.notes = sampleData.notes;
+  state.lastSyncedAt = null;
   if (elements.notes) {
     elements.notes.value = state.notes;
   }
@@ -1044,13 +1068,7 @@ const importData = (event) => {
   reader.onload = () => {
     try {
       const parsed = JSON.parse(reader.result);
-      state.mentors = parsed.mentors || [];
-      state.scholars = parsed.scholars || [];
-      state.assignments = parsed.assignments || {};
-      state.notes = parsed.notes || "";
-      if (elements.notes) {
-        elements.notes.value = state.notes;
-      }
+      ingestState(parsed);
       saveState();
       renderAll();
     } catch (error) {
@@ -1066,9 +1084,60 @@ const handleNotesChange = (event) => {
   renderPreview();
 };
 
+const saveToCloud = async () => {
+  setSyncStatus("Saving snapshot to cloud...", "loading");
+  try {
+    const payload = {
+      ...state,
+      lastSyncedAt: new Date().toISOString(),
+    };
+    const response = await fetch(CLOUD_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: payload }),
+    });
+    if (!response.ok) {
+      throw new Error("Save failed");
+    }
+    const data = await response.json();
+    state.lastSyncedAt = data.updatedAt || data.created_at || payload.lastSyncedAt;
+    saveState();
+    setSyncStatus(`Cloud snapshot saved at ${new Date(state.lastSyncedAt).toLocaleString()}.`, "success");
+  } catch (error) {
+    console.error(error);
+    setSyncStatus("Cloud save failed. Check your connection or API status.", "error");
+  }
+};
+
+const loadFromCloud = async () => {
+  setSyncStatus("Loading snapshot from cloud...", "loading");
+  try {
+    const response = await fetch(CLOUD_ENDPOINT);
+    if (!response.ok) {
+      throw new Error("Load failed");
+    }
+    const data = await response.json();
+    const payload = data.payload || data.data || {};
+    ingestState(payload);
+    state.lastSyncedAt = data.updatedAt || data.created_at || payload.lastSyncedAt || null;
+    saveState();
+    renderAll();
+    setSyncStatus(
+      `Cloud snapshot loaded from ${new Date(state.lastSyncedAt).toLocaleString()}.`,
+      "success"
+    );
+  } catch (error) {
+    console.error(error);
+    setSyncStatus("Cloud load failed. Check your connection or API status.", "error");
+  }
+};
+
 loadState();
 if (elements.notes) {
   elements.notes.value = state.notes;
+}
+if (state.lastSyncedAt) {
+  setSyncStatus(`Last cloud sync: ${new Date(state.lastSyncedAt).toLocaleString()}.`, "success");
 }
 renderAll();
 
@@ -1079,4 +1148,10 @@ elements.autoAssign.addEventListener("click", autoAssignMatches);
 elements.exportJson.addEventListener("click", exportData);
 elements.importJson.addEventListener("change", importData);
 elements.resetData.addEventListener("click", seedSampleData);
+if (elements.saveCloud) {
+  elements.saveCloud.addEventListener("click", saveToCloud);
+}
+if (elements.loadCloud) {
+  elements.loadCloud.addEventListener("click", loadFromCloud);
+}
 elements.notes.addEventListener("input", handleNotesChange);

@@ -28,3 +28,9 @@
 
 ## Iteration 4
 - Added a cohort coverage board with coverage %, urgency/intensity averages, mentor counts, and next-step actions per cohort.
+
+## Iteration 26
+- Added cloud snapshot sync UI with save/load controls and status messaging.
+- Built Vercel serverless API endpoints with PostgreSQL storage and schema setup.
+- Seeded the production database with a default mentor map snapshot.
+- Attempted production redeploy; blocked by Vercel daily deployment limit.
