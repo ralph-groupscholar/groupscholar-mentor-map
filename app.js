@@ -30,6 +30,8 @@ const elements = {
   saveCloud: document.getElementById("save-cloud"),
   loadCloud: document.getElementById("load-cloud"),
   syncStatus: document.getElementById("sync-status"),
+  snapshotList: document.getElementById("snapshot-list"),
+  refreshHistory: document.getElementById("refresh-history"),
   jsonPreview: document.getElementById("json-preview"),
   notes: document.getElementById("notes"),
 };
@@ -953,6 +955,64 @@ const setSyncStatus = (message, tone = "neutral") => {
   }
 };
 
+const formatSnapshotTime = (timestamp) => {
+  if (!timestamp) return "Unknown time";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "Unknown time";
+  return date.toLocaleString();
+};
+
+const renderSnapshotHistory = (snapshots) => {
+  if (!elements.snapshotList) return;
+  if (!snapshots || !snapshots.length) {
+    elements.snapshotList.innerHTML =
+      '<div class="snapshot-empty">No cloud snapshots yet. Save one to start a history.</div>';
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "snapshot-list";
+  snapshots.forEach((snapshot) => {
+    const card = document.createElement("div");
+    card.className = "snapshot-card";
+    const notePreview = snapshot.notes ? snapshot.notes.slice(0, 120) : "";
+    card.innerHTML = `
+      <strong>${formatSnapshotTime(snapshot.created_at || snapshot.createdAt)}</strong>
+      <div class="snapshot-meta">
+        <span>Mentors: ${snapshot.mentor_count ?? "–"}</span>
+        <span>Scholars: ${snapshot.scholar_count ?? "–"}</span>
+        <span>Assignments: ${snapshot.assignment_count ?? "–"}</span>
+      </div>
+      ${notePreview ? `<span class="muted">${notePreview}</span>` : ""}
+      <div class="snapshot-actions">
+        <button class="ghost" data-snapshot-id="${snapshot.id}">Load snapshot</button>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+
+  elements.snapshotList.innerHTML = "";
+  elements.snapshotList.appendChild(list);
+};
+
+const fetchSnapshotHistory = async () => {
+  if (!elements.snapshotList) return;
+  elements.snapshotList.innerHTML =
+    '<div class="snapshot-empty">Loading snapshot history...</div>';
+  try {
+    const response = await fetch(`${CLOUD_ENDPOINT}?list=1&limit=6`);
+    if (!response.ok) {
+      throw new Error("History fetch failed");
+    }
+    const data = await response.json();
+    renderSnapshotHistory(data.snapshots || []);
+  } catch (error) {
+    console.error(error);
+    elements.snapshotList.innerHTML =
+      '<div class="snapshot-empty">Unable to load snapshot history.</div>';
+  }
+};
+
 const renderAll = () => {
   renderMentors();
   renderScholars();
@@ -1103,16 +1163,18 @@ const saveToCloud = async () => {
     state.lastSyncedAt = data.updatedAt || data.created_at || payload.lastSyncedAt;
     saveState();
     setSyncStatus(`Cloud snapshot saved at ${new Date(state.lastSyncedAt).toLocaleString()}.`, "success");
+    fetchSnapshotHistory();
   } catch (error) {
     console.error(error);
     setSyncStatus("Cloud save failed. Check your connection or API status.", "error");
   }
 };
 
-const loadFromCloud = async () => {
+const loadFromCloud = async (snapshotId) => {
   setSyncStatus("Loading snapshot from cloud...", "loading");
   try {
-    const response = await fetch(CLOUD_ENDPOINT);
+    const url = snapshotId ? `${CLOUD_ENDPOINT}?id=${snapshotId}` : CLOUD_ENDPOINT;
+    const response = await fetch(url);
     if (!response.ok) {
       throw new Error("Load failed");
     }
@@ -1126,6 +1188,7 @@ const loadFromCloud = async () => {
       `Cloud snapshot loaded from ${new Date(state.lastSyncedAt).toLocaleString()}.`,
       "success"
     );
+    fetchSnapshotHistory();
   } catch (error) {
     console.error(error);
     setSyncStatus("Cloud load failed. Check your connection or API status.", "error");
@@ -1140,6 +1203,7 @@ if (state.lastSyncedAt) {
   setSyncStatus(`Last cloud sync: ${new Date(state.lastSyncedAt).toLocaleString()}.`, "success");
 }
 renderAll();
+fetchSnapshotHistory();
 
 elements.mentorForm.addEventListener("submit", handleMentorSubmit);
 elements.scholarForm.addEventListener("submit", handleScholarSubmit);
@@ -1153,5 +1217,17 @@ if (elements.saveCloud) {
 }
 if (elements.loadCloud) {
   elements.loadCloud.addEventListener("click", loadFromCloud);
+}
+if (elements.refreshHistory) {
+  elements.refreshHistory.addEventListener("click", fetchSnapshotHistory);
+}
+if (elements.snapshotList) {
+  elements.snapshotList.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-snapshot-id]");
+    if (!button) return;
+    const snapshotId = button.dataset.snapshotId;
+    if (!snapshotId) return;
+    loadFromCloud(snapshotId);
+  });
 }
 elements.notes.addEventListener("input", handleNotesChange);

@@ -34,3 +34,13 @@
 - Built Vercel serverless API endpoints with PostgreSQL storage and schema setup.
 - Seeded the production database with a default mentor map snapshot.
 - Attempted production redeploy; blocked by Vercel daily deployment limit.
+
+## Iteration 5
+- Added Postgres-backed cloud snapshot sync with Vercel serverless function.
+- Standardized ingest logic for local/import/cloud data and improved sync status messaging.
+- Seeded production database with mentor map snapshot data.
+
+## Iteration 41
+- Added cloud snapshot history UI with refresh/load controls and summary metadata.
+- Extended cloud API to list and load specific snapshots by id for fast restores.
+- Wired snapshot history refresh into save/load flows and page initialization.
