@@ -44,3 +44,8 @@
 - Added cloud snapshot history UI with refresh/load controls and summary metadata.
 - Extended cloud API to list and load specific snapshots by id for fast restores.
 - Wired snapshot history refresh into save/load flows and page initialization.
+
+## Iteration 42
+- Reworked cloud snapshot API to use shared mentor_map schema with historical snapshots and list queries.
+- Seeded mentor_map.snapshot_history with starter data for snapshot history.
+- Attempted production redeploy; blocked by Vercel deployment quota.

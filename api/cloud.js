@@ -1,119 +1,136 @@
-const { Pool } = require("pg");
+const { ensureSchema, getPool } = require("./_db");
 
-const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL ||
-    process.env.POSTGRES_URL ||
-    process.env.POSTGRES_PRISMA_URL ||
-    process.env.SUPABASE_DB_URL,
-  ssl: process.env.PGSSLMODE === "disable" ? false : { rejectUnauthorized: false },
-});
-
-const TABLE_NAME = "groupscholar_mentor_map_snapshots";
-
-const ensureTable = async (client) => {
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
+const ensureHistoryTable = async (pool) => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS mentor_map.snapshot_history (
       id BIGSERIAL PRIMARY KEY,
       payload JSONB NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      mentor_count INTEGER,
+      scholar_count INTEGER,
+      assignment_count INTEGER,
+      notes TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
 };
 
-const parseLimit = (value) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return 6;
-  return Math.min(Math.max(parsed, 1), 20);
+const parseBody = (req) => {
+  if (!req.body) return null;
+  if (typeof req.body === "string") {
+    try {
+      return JSON.parse(req.body);
+    } catch (error) {
+      return null;
+    }
+  }
+  return req.body;
+};
+
+const summarizePayload = (payload) => {
+  const mentors = Array.isArray(payload.mentors) ? payload.mentors.length : 0;
+  const scholars = Array.isArray(payload.scholars) ? payload.scholars.length : 0;
+  const assignments = payload.assignments
+    ? Object.keys(payload.assignments).filter((key) => payload.assignments[key]).length
+    : 0;
+  const notes = typeof payload.notes === "string" ? payload.notes.slice(0, 240) : null;
+
+  return {
+    mentors,
+    scholars,
+    assignments,
+    notes,
+  };
 };
 
 module.exports = async (req, res) => {
   res.setHeader("Content-Type", "application/json");
   res.setHeader("Cache-Control", "no-store");
 
-  if (!pool.options.connectionString) {
-    res.status(500).json({ error: "Database not configured" });
-    return;
-  }
-
-  const client = await pool.connect();
   try {
-    await ensureTable(client);
+    await ensureSchema();
+    const pool = getPool();
+    await ensureHistoryTable(pool);
 
     if (req.method === "POST") {
-      const { data } = req.body || {};
-      if (!data) {
-        res.status(400).json({ error: "Missing data" });
+      const payload = parseBody(req);
+      if (!payload) {
+        res.status(400).json({ ok: false, message: "Missing payload" });
         return;
       }
 
-      const result = await client.query(
-        `INSERT INTO ${TABLE_NAME} (payload) VALUES ($1) RETURNING created_at`,
-        [data]
+      const summary = summarizePayload(payload);
+      const { rows } = await pool.query(
+        `
+        INSERT INTO mentor_map.snapshot_history (
+          payload,
+          mentor_count,
+          scholar_count,
+          assignment_count,
+          notes
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, created_at;
+      `,
+        [payload, summary.mentors, summary.scholars, summary.assignments, summary.notes]
       );
 
-      res.status(200).json({ created_at: result.rows[0].created_at });
+      res.status(200).json({ ok: true, id: rows[0].id, created_at: rows[0].created_at });
       return;
     }
 
     if (req.method === "GET") {
-      const query = req.query || {};
-      if (query.id) {
-        const result = await client.query(
-          `SELECT payload, created_at FROM ${TABLE_NAME} WHERE id = $1 LIMIT 1;`,
-          [query.id]
-        );
-        if (!result.rows.length) {
-          res.status(404).json({ error: "Snapshot not found" });
-          return;
-        }
-        res.status(200).json({
-          payload: result.rows[0].payload,
-          created_at: result.rows[0].created_at,
-        });
-        return;
-      }
-
-      if (query.list) {
-        const limit = parseLimit(query.limit);
-        const result = await client.query(
+      const { id, list, limit } = req.query || {};
+      if (list) {
+        const listLimit = Math.min(Number(limit) || 6, 20);
+        const { rows } = await pool.query(
           `
-          SELECT
-            id,
-            created_at,
-            COALESCE(jsonb_array_length(payload->'mentors'), 0) AS mentor_count,
-            COALESCE(jsonb_array_length(payload->'scholars'), 0) AS scholar_count,
-            COALESCE(jsonb_object_length(payload->'assignments'), 0) AS assignment_count,
-            payload->>'notes' AS notes
-          FROM ${TABLE_NAME}
+          SELECT id, created_at, mentor_count, scholar_count, assignment_count, notes
+          FROM mentor_map.snapshot_history
           ORDER BY created_at DESC
           LIMIT $1;
         `,
-          [limit]
+          [listLimit]
         );
-        res.status(200).json({ snapshots: result.rows });
+        res.status(200).json({ ok: true, snapshots: rows });
         return;
       }
 
-      const result = await client.query(
-        `SELECT payload, created_at FROM ${TABLE_NAME} ORDER BY created_at DESC LIMIT 1;`
-      );
-      if (!result.rows.length) {
-        res.status(200).json({ data: null, created_at: null });
+      if (id) {
+        const { rows } = await pool.query(
+          `
+          SELECT payload, created_at
+          FROM mentor_map.snapshot_history
+          WHERE id = $1;
+        `,
+          [id]
+        );
+        if (!rows.length) {
+          res.status(404).json({ ok: false, message: "Snapshot not found" });
+          return;
+        }
+        res.status(200).json({ ok: true, payload: rows[0].payload, created_at: rows[0].created_at });
         return;
       }
-      res.status(200).json({
-        data: result.rows[0].payload,
-        created_at: result.rows[0].created_at,
-      });
+
+      const { rows } = await pool.query(
+        `
+        SELECT payload, created_at
+        FROM mentor_map.snapshot_history
+        ORDER BY created_at DESC
+        LIMIT 1;
+      `
+      );
+      if (!rows.length) {
+        res.status(404).json({ ok: false, message: "No snapshot found" });
+        return;
+      }
+      res.status(200).json({ ok: true, payload: rows[0].payload, created_at: rows[0].created_at });
       return;
     }
 
-    res.status(405).json({ error: "Method not allowed" });
+    res.status(405).json({ ok: false, message: "Method not allowed" });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Server error" });
-  } finally {
-    client.release();
+    res.status(500).json({ ok: false, message: "Server error" });
   }
 };
