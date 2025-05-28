@@ -58,6 +58,7 @@
 - Added a rebalance studio that surfaces overloaded mentors and reassignment options.
 - Wired reassignment actions to one-click move scholars to available mentors.
 - Styled the rebalance cards to match the existing dashboard system.
+- Attempted production deploy; blocked by Vercel free-tier daily deployment limit.
 
 ## Iteration 86
 - Added mentor dependency map panel to surface critical mentors, sole-coverage tags, and load risk.
