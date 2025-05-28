@@ -49,3 +49,17 @@
 - Reworked cloud snapshot API to use shared mentor_map schema with historical snapshots and list queries.
 - Seeded mentor_map.snapshot_history with starter data for snapshot history.
 - Attempted production redeploy; blocked by Vercel deployment quota.
+
+## Iteration 76
+- Fixed cloud snapshot save/load to use normalized payloads, with compatibility for legacy wrapped data.
+- Hardened serverless API responses so snapshot loads always return clean payloads.
+
+## Iteration 77
+- Added a rebalance studio that surfaces overloaded mentors and reassignment options.
+- Wired reassignment actions to one-click move scholars to available mentors.
+- Styled the rebalance cards to match the existing dashboard system.
+
+## Iteration 86
+- Added mentor dependency map panel to surface critical mentors, sole-coverage tags, and load risk.
+- Implemented dependency scoring with capacity/hour utilization and coverage scarcity flags.
+- Updated styling for dependency risk badges to align with dashboard visual system.

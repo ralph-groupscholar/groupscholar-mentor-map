@@ -20,7 +20,10 @@ const elements = {
   cohortBoard: document.getElementById("cohort-board"),
   engagementPlan: document.getElementById("engagement-plan"),
   actionQueue: document.getElementById("action-queue"),
+  dependencyBoard: document.getElementById("dependency-board"),
   coverageBoard: document.getElementById("coverage-board"),
+  recruitmentPlan: document.getElementById("recruitment-plan"),
+  rebalanceBoard: document.getElementById("rebalance-board"),
   headlineMetrics: document.getElementById("headline-metrics"),
   generateMatches: document.getElementById("generate-matches"),
   autoAssign: document.getElementById("auto-assign"),
@@ -795,6 +798,122 @@ const renderActionQueue = () => {
   elements.actionQueue.appendChild(list);
 };
 
+const renderDependencyBoard = () => {
+  if (!elements.dependencyBoard) return;
+  elements.dependencyBoard.innerHTML = "";
+
+  if (!state.mentors.length) {
+    elements.dependencyBoard.innerHTML =
+      "<p>Add mentors to surface dependency risk and coverage fragility.</p>";
+    return;
+  }
+
+  const tagCoverage = state.mentors.reduce((acc, mentor) => {
+    (mentor.tags || []).forEach((tag) => {
+      acc[tag] = (acc[tag] || 0) + 1;
+    });
+    return acc;
+  }, {});
+
+  const mentorProfiles = state.mentors.map((mentor) => {
+    const assignedScholars = getMentorAssignments(mentor.id);
+    const assignedCount = assignedScholars.length;
+    const loadHours = getMentorLoadHours(mentor.id);
+    const utilization = getMentorUtilization(mentor);
+    const hoursUtilization = getMentorHoursUtilization(mentor);
+    const tags = mentor.tags || [];
+    const scarcityScore = tags.reduce((sum, tag) => {
+      const coverage = tagCoverage[tag] || 0;
+      return sum + (coverage ? 1 / coverage : 1);
+    }, 0);
+    const soleTags = tags.filter((tag) => (tagCoverage[tag] || 0) === 1);
+    const thinTags = tags.filter((tag) => (tagCoverage[tag] || 0) === 2);
+    const exclusiveNeeds = new Set();
+    assignedScholars.forEach((scholar) => {
+      (scholar.needs || []).forEach((need) => {
+        if ((tagCoverage[need] || 0) <= 1) {
+          exclusiveNeeds.add(need);
+        }
+      });
+    });
+
+    const flags = [];
+    if (utilization >= 100 || hoursUtilization >= 100) {
+      flags.push("Over capacity");
+    } else if (utilization >= 80 || hoursUtilization >= 80) {
+      flags.push("High load");
+    }
+    if (soleTags.length) {
+      flags.push(`Sole coverage: ${soleTags.slice(0, 2).join(", ")}`);
+    } else if (thinTags.length) {
+      flags.push(`Thin bench: ${thinTags.slice(0, 2).join(", ")}`);
+    }
+    if (exclusiveNeeds.size) {
+      flags.push(
+        `Exclusive scholar needs: ${Array.from(exclusiveNeeds).slice(0, 2).join(", ")}`
+      );
+    }
+
+    const score =
+      assignedCount * 2 +
+      loadHours * 0.5 +
+      utilization * 0.4 +
+      hoursUtilization * 0.3 +
+      scarcityScore * 5;
+
+    return {
+      mentor,
+      assignedCount,
+      loadHours,
+      utilization,
+      hoursUtilization,
+      flags,
+      score,
+    };
+  });
+
+  const sorted = mentorProfiles.sort((a, b) => b.score - a.score).slice(0, 6);
+  const maxScore = sorted.length ? sorted[0].score : 0;
+  const criticalCutoff = Math.max(20, maxScore * 0.75);
+  const watchCutoff = Math.max(10, maxScore * 0.5);
+
+  const list = document.createElement("div");
+  list.className = "list";
+
+  sorted.forEach((profile) => {
+    let tone = "Stable";
+    let toneClass = "is-stable";
+    if (profile.score >= criticalCutoff) {
+      tone = "Critical";
+      toneClass = "is-critical";
+    } else if (profile.score >= watchCutoff) {
+      tone = "Watch";
+      toneClass = "is-watch";
+    }
+
+    const card = document.createElement("div");
+    card.className = "card dependency-card";
+    card.innerHTML = `
+      <div class="card-header">
+        <h3>${profile.mentor.name}</h3>
+        <span class="badge badge-criticality ${toneClass}">${tone}</span>
+      </div>
+      <p class="muted">${profile.mentor.role || "Mentor"}</p>
+      <div class="plan-row">
+        <span class="pill">${profile.assignedCount} scholars</span>
+        <span class="pill">${profile.utilization}% capacity</span>
+        <span class="pill">${profile.hoursUtilization}% hours</span>
+      </div>
+      <p class="muted">
+        ${profile.flags.length ? profile.flags.join(" • ") : "Balanced coverage footprint."}
+      </p>
+    `;
+    list.appendChild(card);
+  });
+
+  elements.dependencyBoard.appendChild(list);
+};
+
 const renderCoverageBoard = () => {
   elements.coverageBoard.innerHTML = "";
 
@@ -917,6 +1036,257 @@ const renderCoverageBoard = () => {
   elements.coverageBoard.appendChild(card);
 };
 
+const renderRecruitmentPlan = () => {
+  if (!elements.recruitmentPlan) return;
+  elements.recruitmentPlan.innerHTML = "";
+
+  if (!state.mentors.length && !state.scholars.length) {
+    elements.recruitmentPlan.innerHTML = "<p>Add mentors and scholars to see hiring guidance.</p>";
+    return;
+  }
+
+  const totalScholars = state.scholars.length;
+  const totalMentors = state.mentors.length;
+  const totalCapacity = state.mentors.reduce((sum, mentor) => sum + (mentor.capacity || 0), 0);
+  const totalAvailability = state.mentors.reduce(
+    (sum, mentor) => sum + (getMentorAvailability(mentor) || 0),
+    0
+  );
+  const totalDemand = state.scholars.reduce((sum, scholar) => sum + (scholar.intensity || 0), 0);
+
+  const avgCapacity = totalMentors ? totalCapacity / totalMentors : 0;
+  const avgAvailability = totalMentors ? totalAvailability / totalMentors : 0;
+  const fallbackCapacity = avgCapacity || 2;
+  const fallbackAvailability = avgAvailability || 4;
+
+  const capacityDeficit = Math.max(totalScholars - totalCapacity, 0);
+  const hoursTarget = Math.ceil(totalDemand * 1.1);
+  const hoursDeficit = Math.max(hoursTarget - totalAvailability, 0);
+  const neededByCapacity = capacityDeficit
+    ? Math.ceil(capacityDeficit / Math.max(fallbackCapacity, 1))
+    : 0;
+  const neededByHours = hoursDeficit
+    ? Math.ceil(hoursDeficit / Math.max(fallbackAvailability, 1))
+    : 0;
+  const recommendedMentors = Math.max(neededByCapacity, neededByHours);
+
+  const unassignedScholars = state.scholars.filter(
+    (scholar) => !state.assignments[scholar.id]
+  );
+  const unmetNeeds = unassignedScholars.reduce((acc, scholar) => {
+    (scholar.needs || []).forEach((need) => {
+      acc[need] = (acc[need] || 0) + 1;
+    });
+    return acc;
+  }, {});
+  const topNeeds = Object.entries(unmetNeeds)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([need, count]) => `${need} (${count})`)
+    .join(", ");
+
+  const timezoneCoverage = {};
+  state.scholars.forEach((scholar) => {
+    const zone = scholar.timezone || "Timezone TBD";
+    if (!timezoneCoverage[zone]) {
+      timezoneCoverage[zone] = { scholars: 0, mentors: 0 };
+    }
+    timezoneCoverage[zone].scholars += 1;
+  });
+  state.mentors.forEach((mentor) => {
+    const zone = mentor.timezone || "Timezone TBD";
+    if (!timezoneCoverage[zone]) {
+      timezoneCoverage[zone] = { scholars: 0, mentors: 0 };
+    }
+    timezoneCoverage[zone].mentors += 1;
+  });
+
+  const timezoneGaps = Object.entries(timezoneCoverage)
+    .filter(([, data]) => data.scholars > 0)
+    .map(([zone, data]) => ({
+      zone,
+      ratio: data.mentors / data.scholars,
+      mentors: data.mentors,
+      scholars: data.scholars,
+    }))
+    .sort((a, b) => a.ratio - b.ratio)
+    .slice(0, 3)
+    .map((item) => `${item.zone} (${item.mentors}/${item.scholars})`)
+    .join(", ");
+
+  const cohortGaps = unassignedScholars.reduce((acc, scholar) => {
+    const cohort = scholar.cohort || "Unassigned cohort";
+    acc[cohort] = (acc[cohort] || 0) + 1;
+    return acc;
+  }, {});
+  const topCohorts = Object.entries(cohortGaps)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([cohort, count]) => `${cohort} (${count})`)
+    .join(", ");
+
+  const summaryCard = document.createElement("div");
+  summaryCard.className = "card recruitment-card";
+  summaryCard.innerHTML = `
+    <div class="signal">
+      <strong>Recommended net new mentors</strong>
+      <span>${recommendedMentors ? recommendedMentors : "0"} needed to hit coverage + buffer</span>
+    </div>
+    <div class="signal">
+      <strong>Capacity gap</strong>
+      <span>${capacityDeficit} scholar slots short · Avg capacity ${fallbackCapacity.toFixed(1)}</span>
+    </div>
+    <div class="signal">
+      <strong>Hours buffer</strong>
+      <span>${hoursDeficit} hrs short · Target ${hoursTarget} hrs/week</span>
+    </div>
+  `;
+
+  const focusCard = document.createElement("div");
+  focusCard.className = "card recruitment-card";
+  focusCard.innerHTML = `
+    <div class="signal">
+      <strong>Priority expertise</strong>
+      <span>${topNeeds || "No unmet expertise gaps."}</span>
+    </div>
+    <div class="signal">
+      <strong>Timezone gaps</strong>
+      <span>${timezoneGaps || "No timezone gaps."}</span>
+    </div>
+    <div class="signal">
+      <strong>Cohorts waiting</strong>
+      <span>${topCohorts || "All cohorts staffed."}</span>
+    </div>
+  `;
+
+  const list = document.createElement("div");
+  list.className = "list";
+  list.appendChild(summaryCard);
+  list.appendChild(focusCard);
+  elements.recruitmentPlan.appendChild(list);
+};
+
+const findReassignmentOptions = (scholar, currentMentorId) =>
+  state.mentors
+    .filter((mentor) => mentor.id !== currentMentorId)
+    .map((mentor) => {
+      const hasCapacity = getMentorLoadCount(mentor.id) < mentor.capacity;
+      const availability = getMentorAvailability(mentor);
+      const hasHours =
+        availability === 0 ||
+        getMentorLoadHours(mentor.id) + (scholar.intensity || 0) <= availability;
+      return {
+        mentor,
+        score: scoreMentor(mentor, scholar),
+        eligible: hasCapacity && hasHours,
+      };
+    })
+    .filter((option) => option.eligible)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 2);
+
+const renderRebalanceBoard = () => {
+  if (!elements.rebalanceBoard) return;
+  elements.rebalanceBoard.innerHTML = "";
+
+  if (!state.mentors.length && !state.scholars.length) {
+    elements.rebalanceBoard.innerHTML = "<p>Add mentors and scholars to see rebalance options.</p>";
+    return;
+  }
+
+  const overloadedMentors = state.mentors.filter((mentor) => {
+    const overCapacity = getMentorLoadCount(mentor.id) > getMentorCapacity(mentor);
+    const availability = getMentorAvailability(mentor);
+    const overHours = availability > 0 && getMentorLoadHours(mentor.id) > availability;
+    return overCapacity || overHours;
+  });
+
+  if (!overloadedMentors.length) {
+    elements.rebalanceBoard.innerHTML =
+      "<p>No mentors are currently overloaded. Coverage looks balanced.</p>";
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "list";
+
+  overloadedMentors.forEach((mentor) => {
+    const assignedScholars = getMentorAssignments(mentor.id);
+    const card = document.createElement("div");
+    card.className = "card rebalance-card";
+    const overCapacity = getMentorLoadCount(mentor.id) - getMentorCapacity(mentor);
+    const availability = getMentorAvailability(mentor);
+    const overHours =
+      availability > 0 ? getMentorLoadHours(mentor.id) - availability : 0;
+
+    const scholarRows = assignedScholars
+      .map((scholar) => {
+        const options = findReassignmentOptions(scholar, mentor.id);
+        const optionButtons = options.length
+          ? options
+              .map(
+                (option) => `
+                <button class="ghost" data-reassign="1" data-scholar="${scholar.id}" data-mentor="${option.mentor.id}">
+                  Move to ${option.mentor.name}
+                </button>
+              `
+              )
+              .join("")
+          : `<span class="muted">No alternate mentors with capacity.</span>`;
+
+        return `
+          <div class="rebalance-row">
+            <div>
+              <strong>${scholar.name}</strong>
+              <p class="muted">${scholar.cohort || "Cohort TBD"} · ${scholar.intensity || 0} hrs/week</p>
+            </div>
+            <div class="rebalance-actions">
+              ${optionButtons}
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    card.innerHTML = `
+      <div class="card-header">
+        <h3>${mentor.name}</h3>
+        <span class="badge">Rebalance</span>
+      </div>
+      <div class="signal">
+        <strong>${getMentorLoadCount(mentor.id)} assigned · ${getMentorLoadHours(mentor.id)} hrs</strong>
+        <span>Capacity ${mentor.capacity} · Availability ${mentor.availability} hrs</span>
+      </div>
+      <div class="alert">
+        ${
+          overCapacity > 0
+            ? `Over capacity by ${overCapacity} mentee${overCapacity === 1 ? "" : "s"}. `
+            : ""
+        }${
+          overHours > 0
+            ? `Over hours by ${overHours} hr${overHours === 1 ? "" : "s"}.`
+            : ""
+        }
+      </div>
+      <div class="rebalance-rows">
+        ${scholarRows || "<p class=\"muted\">No scholars assigned.</p>"}
+      </div>
+    `;
+    list.appendChild(card);
+  });
+
+  elements.rebalanceBoard.appendChild(list);
+
+  elements.rebalanceBoard.querySelectorAll("button[data-reassign]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const scholarId = button.dataset.scholar;
+      const mentorId = button.dataset.mentor;
+      if (!scholarId || !mentorId) return;
+      assignMentor(scholarId, mentorId);
+    });
+  });
+};
+
 const renderMetrics = () => {
   const assignedCount = Object.keys(state.assignments).length;
   const coverageRatio = state.scholars.length
@@ -1021,7 +1391,10 @@ const renderAll = () => {
   renderCohortBoard();
   renderEngagementPlan();
   renderActionQueue();
+  renderDependencyBoard();
   renderCoverageBoard();
+  renderRecruitmentPlan();
+  renderRebalanceBoard();
   renderMetrics();
   renderPreview();
 };
@@ -1144,6 +1517,13 @@ const handleNotesChange = (event) => {
   renderPreview();
 };
 
+const unwrapCloudPayload = (payload) => {
+  if (!payload || typeof payload !== "object") return payload;
+  if (payload.data && typeof payload.data === "object") return payload.data;
+  if (payload.payload && typeof payload.payload === "object") return payload.payload;
+  return payload;
+};
+
 const saveToCloud = async () => {
   setSyncStatus("Saving snapshot to cloud...", "loading");
   try {
@@ -1154,7 +1534,7 @@ const saveToCloud = async () => {
     const response = await fetch(CLOUD_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: payload }),
+      body: JSON.stringify(payload),
     });
     if (!response.ok) {
       throw new Error("Save failed");
@@ -1179,7 +1559,8 @@ const loadFromCloud = async (snapshotId) => {
       throw new Error("Load failed");
     }
     const data = await response.json();
-    const payload = data.payload || data.data || {};
+    const rawPayload = data.payload || data.data || {};
+    const payload = unwrapCloudPayload(rawPayload) || {};
     ingestState(payload);
     state.lastSyncedAt = data.updatedAt || data.created_at || payload.lastSyncedAt || null;
     saveState();

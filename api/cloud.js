@@ -26,6 +26,13 @@ const parseBody = (req) => {
   return req.body;
 };
 
+const normalizePayload = (body) => {
+  if (!body) return null;
+  if (body.data && typeof body.data === "object") return body.data;
+  if (body.payload && typeof body.payload === "object") return body.payload;
+  return body;
+};
+
 const summarizePayload = (payload) => {
   const mentors = Array.isArray(payload.mentors) ? payload.mentors.length : 0;
   const scholars = Array.isArray(payload.scholars) ? payload.scholars.length : 0;
@@ -52,7 +59,8 @@ module.exports = async (req, res) => {
     await ensureHistoryTable(pool);
 
     if (req.method === "POST") {
-      const payload = parseBody(req);
+      const body = parseBody(req);
+      const payload = normalizePayload(body);
       if (!payload) {
         res.status(400).json({ ok: false, message: "Missing payload" });
         return;
@@ -108,7 +116,8 @@ module.exports = async (req, res) => {
           res.status(404).json({ ok: false, message: "Snapshot not found" });
           return;
         }
-        res.status(200).json({ ok: true, payload: rows[0].payload, created_at: rows[0].created_at });
+        const payload = normalizePayload(rows[0].payload);
+        res.status(200).json({ ok: true, payload, created_at: rows[0].created_at });
         return;
       }
 
@@ -124,7 +133,8 @@ module.exports = async (req, res) => {
         res.status(404).json({ ok: false, message: "No snapshot found" });
         return;
       }
-      res.status(200).json({ ok: true, payload: rows[0].payload, created_at: rows[0].created_at });
+      const payload = normalizePayload(rows[0].payload);
+      res.status(200).json({ ok: true, payload, created_at: rows[0].created_at });
       return;
     }
 
