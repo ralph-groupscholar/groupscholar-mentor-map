@@ -64,3 +64,6 @@
 - Added mentor dependency map panel to surface critical mentors, sole-coverage tags, and load risk.
 - Implemented dependency scoring with capacity/hour utilization and coverage scarcity flags.
 - Updated styling for dependency risk badges to align with dashboard visual system.
+
+## Iteration 66
+- Added mentor dependency map insights highlighting critical mentors, single-threaded scholars, unique expertise, and cohort reliance.

@@ -1166,6 +1166,195 @@ const renderRecruitmentPlan = () => {
   elements.recruitmentPlan.appendChild(list);
 };
 
+const getBackupMentors = (scholar, currentMentorId) => {
+  const needs = scholar.needs || [];
+  return state.mentors
+    .filter((mentor) => mentor.id !== currentMentorId)
+    .map((mentor) => {
+      const overlap = needs.filter((need) => (mentor.tags || []).includes(need)).length;
+      const hasNeedOverlap = needs.length ? overlap > 0 : true;
+      const hasCapacity = getMentorLoadCount(mentor.id) < getMentorCapacity(mentor);
+      const availability = getMentorAvailability(mentor);
+      const hasHours =
+        availability === 0 ||
+        getMentorLoadHours(mentor.id) + (scholar.intensity || 0) <= availability;
+      return {
+        mentor,
+        overlap,
+        eligible: hasNeedOverlap && hasCapacity && hasHours,
+      };
+    })
+    .filter((option) => option.eligible)
+    .sort((a, b) => scoreMentor(b.mentor, scholar) - scoreMentor(a.mentor, scholar));
+};
+
+const renderDependencyBoard = () => {
+  if (!elements.dependencyBoard) return;
+  elements.dependencyBoard.innerHTML = "";
+
+  if (!state.mentors.length && !state.scholars.length) {
+    elements.dependencyBoard.innerHTML =
+      "<p>Add mentors and scholars to see dependency risk signals.</p>";
+    return;
+  }
+
+  const assignedScholars = state.scholars.filter((scholar) => state.assignments[scholar.id]);
+  if (!assignedScholars.length) {
+    elements.dependencyBoard.innerHTML =
+      "<p>No active assignments yet. Dependency signals will appear once scholars are matched.</p>";
+    return;
+  }
+
+  const tagCoverage = state.mentors.reduce((acc, mentor) => {
+    (mentor.tags || []).forEach((tag) => {
+      acc[tag] = (acc[tag] || 0) + 1;
+    });
+    return acc;
+  }, {});
+
+  const cohortTotals = assignedScholars.reduce((acc, scholar) => {
+    const cohort = scholar.cohort || "Unassigned cohort";
+    acc[cohort] = (acc[cohort] || 0) + 1;
+    return acc;
+  }, {});
+
+  const mentorSummaries = state.mentors
+    .map((mentor) => {
+      const assigned = getMentorAssignments(mentor.id);
+      if (!assigned.length) return null;
+
+      const assignmentShare = Math.round((assigned.length / assignedScholars.length) * 100);
+      const backupRisks = assigned.filter(
+        (scholar) => getBackupMentors(scholar, mentor.id).length === 0
+      );
+      const uniqueTags = (mentor.tags || []).filter((tag) => tagCoverage[tag] === 1);
+
+      const mentorCohorts = assigned.reduce((acc, scholar) => {
+        const cohort = scholar.cohort || "Unassigned cohort";
+        acc[cohort] = (acc[cohort] || 0) + 1;
+        return acc;
+      }, {});
+
+      const cohortRisks = Object.entries(mentorCohorts)
+        .map(([cohort, count]) => {
+          const total = cohortTotals[cohort] || count;
+          return {
+            cohort,
+            ratio: total ? count / total : 0,
+            count,
+            total,
+          };
+        })
+        .filter((item) => item.total >= 2 && item.ratio >= 0.5)
+        .sort((a, b) => b.ratio - a.ratio)
+        .slice(0, 3);
+
+      let status = "stable";
+      if (backupRisks.length >= 2 || assignmentShare >= 50 || uniqueTags.length >= 3) {
+        status = "critical";
+      } else if (backupRisks.length >= 1 || assignmentShare >= 30 || uniqueTags.length >= 1) {
+        status = "watch";
+      }
+
+      return {
+        mentor,
+        assigned,
+        assignmentShare,
+        backupRisks,
+        uniqueTags,
+        cohortRisks,
+        status,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      const priority = { critical: 3, watch: 2, stable: 1 };
+      if (priority[b.status] !== priority[a.status]) {
+        return priority[b.status] - priority[a.status];
+      }
+      return b.assignmentShare - a.assignmentShare;
+    });
+
+  if (!mentorSummaries.length) {
+    elements.dependencyBoard.innerHTML = "<p>No dependency risks detected yet.</p>";
+    return;
+  }
+
+  const criticalCount = mentorSummaries.filter((item) => item.status === "critical").length;
+  const watchCount = mentorSummaries.filter((item) => item.status === "watch").length;
+  const singleThreaded = mentorSummaries.reduce(
+    (sum, item) => sum + item.backupRisks.length,
+    0
+  );
+
+  const list = document.createElement("div");
+  list.className = "list";
+
+  const summary = document.createElement("div");
+  summary.className = "card dependency-card";
+  summary.innerHTML = `
+    <div class="signal">
+      <strong>Critical mentors</strong>
+      <span>${criticalCount} flagged · ${watchCount} on watch</span>
+    </div>
+    <div class="signal">
+      <strong>Single-threaded scholars</strong>
+      <span>${singleThreaded} without a ready backup mentor</span>
+    </div>
+    <div class="signal">
+      <strong>Assigned coverage</strong>
+      <span>${assignedScholars.length} scholars matched across ${mentorSummaries.length} mentors</span>
+    </div>
+  `;
+  list.appendChild(summary);
+
+  mentorSummaries.forEach((item) => {
+    const cohortRiskText = item.cohortRisks.length
+      ? item.cohortRisks
+          .map(
+            (risk) =>
+              `${risk.cohort} (${Math.round(risk.ratio * 100)}% · ${risk.count}/${risk.total})`
+          )
+          .join(", ")
+      : "No cohort relies on this mentor for 50%+ of assignments.";
+
+    const card = document.createElement("div");
+    card.className = "card dependency-card";
+    card.innerHTML = `
+      <div class="card-header">
+        <h3>${item.mentor.name}</h3>
+        <span class="badge badge-criticality is-${item.status}">
+          ${item.status === "critical" ? "Critical" : item.status === "watch" ? "Watch" : "Stable"}
+        </span>
+      </div>
+      <p class="muted">${item.mentor.role || "Mentor"} · ${item.assigned.length} scholars · ${
+        item.assignmentShare
+      }% of assigned load</p>
+      <div class="signal">
+        <strong>Single-threaded scholars</strong>
+        <span>${
+          item.backupRisks.length
+            ? item.backupRisks.map((scholar) => scholar.name).join(", ")
+            : "All assigned scholars have backups."
+        }</span>
+      </div>
+      <div class="signal">
+        <strong>Unique coverage</strong>
+        <span>${
+          item.uniqueTags.length ? item.uniqueTags.join(", ") : "No exclusive expertise tags."
+        }</span>
+      </div>
+      <div class="signal">
+        <strong>Cohort reliance</strong>
+        <span>${cohortRiskText}</span>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+
+  elements.dependencyBoard.appendChild(list);
+};
+
 const findReassignmentOptions = (scholar, currentMentorId) =>
   state.mentors
     .filter((mentor) => mentor.id !== currentMentorId)
