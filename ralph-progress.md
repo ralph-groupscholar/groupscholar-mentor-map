@@ -50,6 +50,9 @@
 - Seeded mentor_map.snapshot_history with starter data for snapshot history.
 - Attempted production redeploy; blocked by Vercel deployment quota.
 
+## Iteration 66
+- Added mentor dependency map insights highlighting critical mentors, single-threaded scholars, unique expertise, and cohort reliance.
+
 ## Iteration 76
 - Fixed cloud snapshot save/load to use normalized payloads, with compatibility for legacy wrapped data.
 - Hardened serverless API responses so snapshot loads always return clean payloads.
@@ -61,9 +64,5 @@
 - Attempted production deploy; blocked by Vercel free-tier daily deployment limit.
 
 ## Iteration 86
-- Added mentor dependency map panel to surface critical mentors, sole-coverage tags, and load risk.
-- Implemented dependency scoring with capacity/hour utilization and coverage scarcity flags.
-- Updated styling for dependency risk badges to align with dashboard visual system.
-
-## Iteration 66
-- Added mentor dependency map insights highlighting critical mentors, single-threaded scholars, unique expertise, and cohort reliance.
+- Consolidated dependency map rendering to a single logic path to avoid drift.
+- Added load utilization, capacity/hour risk signals, and overloaded mentor counts to the dependency map.

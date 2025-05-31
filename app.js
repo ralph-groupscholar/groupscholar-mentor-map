@@ -798,122 +798,6 @@ const renderActionQueue = () => {
   elements.actionQueue.appendChild(list);
 };
 
-const renderDependencyBoard = () => {
-  if (!elements.dependencyBoard) return;
-  elements.dependencyBoard.innerHTML = "";
-
-  if (!state.mentors.length) {
-    elements.dependencyBoard.innerHTML =
-      "<p>Add mentors to surface dependency risk and coverage fragility.</p>";
-    return;
-  }
-
-  const tagCoverage = state.mentors.reduce((acc, mentor) => {
-    (mentor.tags || []).forEach((tag) => {
-      acc[tag] = (acc[tag] || 0) + 1;
-    });
-    return acc;
-  }, {});
-
-  const mentorProfiles = state.mentors.map((mentor) => {
-    const assignedScholars = getMentorAssignments(mentor.id);
-    const assignedCount = assignedScholars.length;
-    const loadHours = getMentorLoadHours(mentor.id);
-    const utilization = getMentorUtilization(mentor);
-    const hoursUtilization = getMentorHoursUtilization(mentor);
-    const tags = mentor.tags || [];
-    const scarcityScore = tags.reduce((sum, tag) => {
-      const coverage = tagCoverage[tag] || 0;
-      return sum + (coverage ? 1 / coverage : 1);
-    }, 0);
-    const soleTags = tags.filter((tag) => (tagCoverage[tag] || 0) === 1);
-    const thinTags = tags.filter((tag) => (tagCoverage[tag] || 0) === 2);
-    const exclusiveNeeds = new Set();
-    assignedScholars.forEach((scholar) => {
-      (scholar.needs || []).forEach((need) => {
-        if ((tagCoverage[need] || 0) <= 1) {
-          exclusiveNeeds.add(need);
-        }
-      });
-    });
-
-    const flags = [];
-    if (utilization >= 100 || hoursUtilization >= 100) {
-      flags.push("Over capacity");
-    } else if (utilization >= 80 || hoursUtilization >= 80) {
-      flags.push("High load");
-    }
-    if (soleTags.length) {
-      flags.push(`Sole coverage: ${soleTags.slice(0, 2).join(", ")}`);
-    } else if (thinTags.length) {
-      flags.push(`Thin bench: ${thinTags.slice(0, 2).join(", ")}`);
-    }
-    if (exclusiveNeeds.size) {
-      flags.push(
-        `Exclusive scholar needs: ${Array.from(exclusiveNeeds).slice(0, 2).join(", ")}`
-      );
-    }
-
-    const score =
-      assignedCount * 2 +
-      loadHours * 0.5 +
-      utilization * 0.4 +
-      hoursUtilization * 0.3 +
-      scarcityScore * 5;
-
-    return {
-      mentor,
-      assignedCount,
-      loadHours,
-      utilization,
-      hoursUtilization,
-      flags,
-      score,
-    };
-  });
-
-  const sorted = mentorProfiles.sort((a, b) => b.score - a.score).slice(0, 6);
-  const maxScore = sorted.length ? sorted[0].score : 0;
-  const criticalCutoff = Math.max(20, maxScore * 0.75);
-  const watchCutoff = Math.max(10, maxScore * 0.5);
-
-  const list = document.createElement("div");
-  list.className = "list";
-
-  sorted.forEach((profile) => {
-    let tone = "Stable";
-    let toneClass = "is-stable";
-    if (profile.score >= criticalCutoff) {
-      tone = "Critical";
-      toneClass = "is-critical";
-    } else if (profile.score >= watchCutoff) {
-      tone = "Watch";
-      toneClass = "is-watch";
-    }
-
-    const card = document.createElement("div");
-    card.className = "card dependency-card";
-    card.innerHTML = `
-      <div class="card-header">
-        <h3>${profile.mentor.name}</h3>
-        <span class="badge badge-criticality ${toneClass}">${tone}</span>
-      </div>
-      <p class="muted">${profile.mentor.role || "Mentor"}</p>
-      <div class="plan-row">
-        <span class="pill">${profile.assignedCount} scholars</span>
-        <span class="pill">${profile.utilization}% capacity</span>
-        <span class="pill">${profile.hoursUtilization}% hours</span>
-      </div>
-      <p class="muted">
-        ${profile.flags.length ? profile.flags.join(" • ") : "Balanced coverage footprint."}
-      </p>
-    `;
-    list.appendChild(card);
-  });
-
-  elements.dependencyBoard.appendChild(list);
-};
-
 const renderCoverageBoard = () => {
   elements.coverageBoard.innerHTML = "";
 
@@ -1224,6 +1108,10 @@ const renderDependencyBoard = () => {
       if (!assigned.length) return null;
 
       const assignmentShare = Math.round((assigned.length / assignedScholars.length) * 100);
+      const utilization = getMentorUtilization(mentor);
+      const hoursUtilization = getMentorHoursUtilization(mentor);
+      const overCapacity = utilization >= 100;
+      const overHours = hoursUtilization >= 100;
       const backupRisks = assigned.filter(
         (scholar) => getBackupMentors(scholar, mentor.id).length === 0
       );
@@ -1250,9 +1138,21 @@ const renderDependencyBoard = () => {
         .slice(0, 3);
 
       let status = "stable";
-      if (backupRisks.length >= 2 || assignmentShare >= 50 || uniqueTags.length >= 3) {
+      if (
+        overCapacity ||
+        overHours ||
+        backupRisks.length >= 2 ||
+        assignmentShare >= 50 ||
+        uniqueTags.length >= 3
+      ) {
         status = "critical";
-      } else if (backupRisks.length >= 1 || assignmentShare >= 30 || uniqueTags.length >= 1) {
+      } else if (
+        backupRisks.length >= 1 ||
+        assignmentShare >= 30 ||
+        uniqueTags.length >= 1 ||
+        utilization >= 80 ||
+        hoursUtilization >= 80
+      ) {
         status = "watch";
       }
 
@@ -1263,6 +1163,10 @@ const renderDependencyBoard = () => {
         backupRisks,
         uniqueTags,
         cohortRisks,
+        utilization,
+        hoursUtilization,
+        overCapacity,
+        overHours,
         status,
       };
     })
@@ -1286,6 +1190,9 @@ const renderDependencyBoard = () => {
     (sum, item) => sum + item.backupRisks.length,
     0
   );
+  const overloadedMentors = mentorSummaries.filter(
+    (item) => item.overCapacity || item.overHours
+  ).length;
 
   const list = document.createElement("div");
   list.className = "list";
@@ -1300,6 +1207,10 @@ const renderDependencyBoard = () => {
     <div class="signal">
       <strong>Single-threaded scholars</strong>
       <span>${singleThreaded} without a ready backup mentor</span>
+    </div>
+    <div class="signal">
+      <strong>Overloaded mentors</strong>
+      <span>${overloadedMentors} at or above capacity/hours</span>
     </div>
     <div class="signal">
       <strong>Assigned coverage</strong>
@@ -1330,6 +1241,21 @@ const renderDependencyBoard = () => {
       <p class="muted">${item.mentor.role || "Mentor"} · ${item.assigned.length} scholars · ${
         item.assignmentShare
       }% of assigned load</p>
+      <div class="plan-row">
+        <span class="pill">${item.assigned.length} scholars</span>
+        <span class="pill">${item.utilization}% capacity</span>
+        <span class="pill">${item.hoursUtilization}% hours</span>
+      </div>
+      <div class="signal">
+        <strong>Load risk</strong>
+        <span>${
+          item.overCapacity || item.overHours
+            ? `${item.overCapacity ? "Over capacity" : "At capacity"}${
+                item.overCapacity && item.overHours ? " · " : ""
+              }${item.overHours ? "Over hours" : "Within hours"}`
+            : "Within capacity and hours."
+        }</span>
+      </div>
       <div class="signal">
         <strong>Single-threaded scholars</strong>
         <span>${
