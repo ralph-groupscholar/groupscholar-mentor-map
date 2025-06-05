@@ -66,3 +66,8 @@
 ## Iteration 86
 - Consolidated dependency map rendering to a single logic path to avoid drift.
 - Added load utilization, capacity/hour risk signals, and overloaded mentor counts to the dependency map.
+
+## Iteration 87
+- Added a scholar risk radar with score-based alerts, reasons, and next-action guidance.
+- Highlighted mentor load, urgency, intensity, and coverage gaps in the new risk cards.
+- Wired the risk radar into the main dashboard render flow.

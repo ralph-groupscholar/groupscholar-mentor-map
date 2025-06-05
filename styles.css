@@ -280,6 +280,29 @@ main {
   border-left: 4px solid #f3a66c;
 }
 
+.risk-card {
+  border-left: 4px solid var(--accent-dark);
+}
+
+.risk-meta {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.risk-section {
+  display: grid;
+  gap: 6px;
+}
+
+.risk-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
 .match-actions {
   display: flex;
   flex-wrap: wrap;

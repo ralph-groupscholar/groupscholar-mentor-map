@@ -20,7 +20,9 @@ const elements = {
   cohortBoard: document.getElementById("cohort-board"),
   engagementPlan: document.getElementById("engagement-plan"),
   actionQueue: document.getElementById("action-queue"),
+  riskRadar: document.getElementById("risk-radar"),
   dependencyBoard: document.getElementById("dependency-board"),
+  continuityPlaybook: document.getElementById("continuity-playbook"),
   coverageBoard: document.getElementById("coverage-board"),
   recruitmentPlan: document.getElementById("recruitment-plan"),
   rebalanceBoard: document.getElementById("rebalance-board"),
@@ -686,6 +688,148 @@ const renderEngagementPlan = () => {
   });
 
   elements.engagementPlan.appendChild(list);
+};
+
+const buildScholarRiskProfile = (scholar) => {
+  const reasons = [];
+  const actions = new Set();
+  let score = 0;
+
+  const urgency = Number(scholar.urgency) || 0;
+  const intensity = Number(scholar.intensity) || 0;
+  score += urgency * 2 + intensity;
+
+  if (urgency >= 4) {
+    reasons.push("High urgency");
+    actions.add("Escalate touchpoint cadence");
+  }
+  if (intensity >= 4) {
+    reasons.push("High mentoring intensity");
+    actions.add("Confirm weekly capacity plan");
+  }
+
+  const assignedMentorId = state.assignments[scholar.id];
+  const assignedMentor = assignedMentorId ? getMentorById(assignedMentorId) : null;
+
+  if (!assignedMentor) {
+    score += 6;
+    reasons.push("Unassigned mentor");
+    actions.add("Assign a primary mentor");
+  } else {
+    const utilization = getMentorUtilization(assignedMentor);
+    const hoursUtilization = getMentorHoursUtilization(assignedMentor);
+    if (utilization >= 100) {
+      score += 3;
+      reasons.push("Mentor over capacity");
+      actions.add("Rebalance to another mentor");
+    }
+    if (hoursUtilization >= 100) {
+      score += 2;
+      reasons.push("Mentor over hours");
+      actions.add("Reduce hours or add support");
+    }
+    if (
+      assignedMentor.timezone &&
+      scholar.timezone &&
+      assignedMentor.timezone !== scholar.timezone
+    ) {
+      score += 1;
+      reasons.push("Timezone mismatch");
+      actions.add("Confirm async support plan");
+    }
+    if (!getBackupMentors(scholar, assignedMentor.id).length) {
+      score += 2;
+      reasons.push("No backup mentor available");
+      actions.add("Recruit backup coverage");
+    }
+  }
+
+  const hasExpertiseCoverage = (scholar.needs || []).length
+    ? state.mentors.some((mentor) =>
+        (mentor.tags || []).some((tag) => (scholar.needs || []).includes(tag))
+      )
+    : true;
+
+  if (!hasExpertiseCoverage) {
+    score += 3;
+    reasons.push("Expertise gap for scholar needs");
+    actions.add("Recruit targeted expertise");
+  }
+
+  const level = score >= 12 ? "Critical" : score >= 8 ? "Watch" : "Stable";
+  const badgeClass =
+    score >= 12 ? "is-critical" : score >= 8 ? "is-watch" : "is-stable";
+
+  return {
+    score,
+    level,
+    badgeClass,
+    reasons,
+    actions: Array.from(actions),
+    mentor: assignedMentor,
+  };
+};
+
+const renderRiskRadar = () => {
+  if (!elements.riskRadar) return;
+  elements.riskRadar.innerHTML = "";
+
+  if (!state.mentors.length && !state.scholars.length) {
+    elements.riskRadar.innerHTML = "<p>Add mentors and scholars to surface risk alerts.</p>";
+    return;
+  }
+
+  if (!state.scholars.length) {
+    elements.riskRadar.innerHTML = "<p>No scholars yet. Add scholars to see risk signals.</p>";
+    return;
+  }
+
+  const profiles = state.scholars
+    .map((scholar) => ({
+      scholar,
+      profile: buildScholarRiskProfile(scholar),
+    }))
+    .sort((a, b) => b.profile.score - a.profile.score)
+    .slice(0, 6);
+
+  const list = document.createElement("div");
+  list.className = "list";
+
+  profiles.forEach(({ scholar, profile }) => {
+    const mentorName = profile.mentor ? profile.mentor.name : "Unassigned";
+    const mentorLoad = profile.mentor
+      ? `${getMentorLoadCount(profile.mentor.id)}/${getMentorCapacity(profile.mentor)}`
+      : "–";
+    const reasons = profile.reasons.length ? profile.reasons.slice(0, 3) : ["Stable coverage"];
+    const actions = profile.actions.length ? profile.actions.slice(0, 3) : ["Maintain cadence"];
+
+    const card = document.createElement("div");
+    card.className = "card risk-card";
+    card.innerHTML = `
+      <div class="card-header">
+        <h3>${scholar.name}</h3>
+        <span class="badge badge-criticality ${profile.badgeClass}">${profile.level}</span>
+      </div>
+      <div class="risk-meta">
+        <span><strong>Mentor:</strong> ${mentorName}</span>
+        <span><strong>Load:</strong> ${mentorLoad}</span>
+        <span><strong>Urgency:</strong> ${scholar.urgency || 0} · <strong>Intensity:</strong> ${
+      scholar.intensity || 0
+    }</span>
+      </div>
+      <div class="risk-section">
+        <span class="muted">Reasons</span>
+        <ul>${reasons.map((reason) => `<li>${reason}</li>`).join("")}</ul>
+      </div>
+      <div class="risk-section">
+        <span class="muted">Next actions</span>
+        <ul>${actions.map((action) => `<li>${action}</li>`).join("")}</ul>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+
+  elements.riskRadar.appendChild(list);
 };
 
 const renderActionQueue = () => {
@@ -1505,6 +1649,7 @@ const renderAll = () => {
   renderSignals();
   renderCohortBoard();
   renderEngagementPlan();
+  renderRiskRadar();
   renderActionQueue();
   renderDependencyBoard();
   renderCoverageBoard();
