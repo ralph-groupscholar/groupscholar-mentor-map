@@ -5,6 +5,7 @@ const state = {
   scholars: [],
   assignments: {},
   notes: "",
+  activityLog: [],
   lastSyncedAt: null,
 };
 
@@ -20,11 +21,16 @@ const elements = {
   cohortBoard: document.getElementById("cohort-board"),
   engagementPlan: document.getElementById("engagement-plan"),
   actionQueue: document.getElementById("action-queue"),
+  qualityBoard: document.getElementById("quality-board"),
+  opportunityBoard: document.getElementById("opportunity-board"),
+  activityLog: document.getElementById("activity-log"),
+  activityForm: document.getElementById("activity-form"),
   riskRadar: document.getElementById("risk-radar"),
   dependencyBoard: document.getElementById("dependency-board"),
   continuityPlaybook: document.getElementById("continuity-playbook"),
   coverageBoard: document.getElementById("coverage-board"),
   recruitmentPlan: document.getElementById("recruitment-plan"),
+  pipelineBoard: document.getElementById("pipeline-board"),
   rebalanceBoard: document.getElementById("rebalance-board"),
   headlineMetrics: document.getElementById("headline-metrics"),
   generateMatches: document.getElementById("generate-matches"),
@@ -51,6 +57,7 @@ const sampleData = {
       availability: 6,
       capacity: 3,
       timezone: "ET",
+      stage: "active",
       notes: "Enjoys early-stage scholars with research goals.",
     },
     {
@@ -61,6 +68,7 @@ const sampleData = {
       availability: 4,
       capacity: 2,
       timezone: "PT",
+      stage: "onboarding",
       notes: "Prefers visual portfolios and weekly check-ins.",
     },
     {
@@ -71,6 +79,7 @@ const sampleData = {
       availability: 8,
       capacity: 4,
       timezone: "CT",
+      stage: "invited",
       notes: "Strong on internship pipelines and sponsor outreach.",
     },
   ],
@@ -108,6 +117,24 @@ const sampleData = {
   ],
   assignments: {},
   notes: "",
+  activityLog: [
+    {
+      id: crypto.randomUUID(),
+      timestamp: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
+      type: "note",
+      summary: "Seeded mentor roster and scholar intake.",
+      detail: "Initial cohort loaded for Spring 2026 intake planning.",
+      owner: "Ops",
+    },
+    {
+      id: crypto.randomUUID(),
+      timestamp: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
+      type: "decision",
+      summary: "Prepared matching studio for assignments.",
+      detail: "Ready to pair mentors based on urgency and expertise overlap.",
+      owner: "Program lead",
+    },
+  ],
 };
 
 const normalizeTags = (value) =>
@@ -115,6 +142,38 @@ const normalizeTags = (value) =>
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
+
+const normalizeStage = (value) => {
+  const cleaned = (value || "").toString().trim().toLowerCase();
+  if (!cleaned) return "active";
+  const allowed = new Set(["invited", "onboarding", "active", "paused"]);
+  return allowed.has(cleaned) ? cleaned : "active";
+};
+
+const normalizeActivityEntry = (entry) => {
+  if (!entry || typeof entry !== "object") {
+    return {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      type: "note",
+      summary: "Activity logged.",
+      detail: "",
+      owner: "",
+    };
+  }
+  return {
+    id: entry.id || crypto.randomUUID(),
+    timestamp: entry.timestamp || entry.time || entry.createdAt || new Date().toISOString(),
+    type: entry.type || "note",
+    summary: entry.summary || entry.title || "Activity logged.",
+    detail: entry.detail || entry.notes || "",
+    owner: entry.owner || entry.by || "",
+    scholarId: entry.scholarId || null,
+    mentorId: entry.mentorId || null,
+    previousMentorId: entry.previousMentorId || null,
+    source: entry.source || "",
+  };
+};
 
 const saveState = () => {
   localStorage.setItem(storageKey, JSON.stringify(state));
@@ -126,6 +185,7 @@ const ingestState = (parsed) => {
     tags: mentor.tags || mentor.expertise || [],
     availability: Number(mentor.availability) || 0,
     capacity: Number(mentor.capacity) || 0,
+    stage: normalizeStage(mentor.stage),
   }));
   state.scholars = (parsed.scholars || []).map((scholar) => ({
     ...scholar,
@@ -135,6 +195,9 @@ const ingestState = (parsed) => {
   }));
   state.assignments = parsed.assignments || {};
   state.notes = parsed.notes || "";
+  state.activityLog = (parsed.activityLog || parsed.activity || []).map((entry) =>
+    normalizeActivityEntry(entry)
+  );
   state.lastSyncedAt = parsed.lastSyncedAt || null;
   if (elements.notes) {
     elements.notes.value = state.notes;
@@ -217,6 +280,7 @@ const buildRationale = (mentor, scholar) => {
 };
 
 const getMentorById = (mentorId) => state.mentors.find((mentor) => mentor.id === mentorId);
+const getScholarById = (scholarId) => state.scholars.find((scholar) => scholar.id === scholarId);
 
 const renderMentors = () => {
   elements.mentorList.innerHTML = "";
@@ -235,13 +299,18 @@ const renderMentors = () => {
     const utilization = mentor.capacity
       ? Math.round((assignedCount / mentor.capacity) * 100)
       : 0;
+    const stage = normalizeStage(mentor.stage);
+    const stageLabel = stage.charAt(0).toUpperCase() + stage.slice(1);
 
     const card = document.createElement("div");
     card.className = "card";
     card.innerHTML = `
       <div class="card-header">
         <h3>${mentor.name}</h3>
-        <span class="badge">${mentor.role || "Mentor"}</span>
+        <div class="badge-stack">
+          <span class="badge">${mentor.role || "Mentor"}</span>
+          <span class="badge badge-stage stage-${stage}">${stageLabel}</span>
+        </div>
       </div>
       <div class="tags">${tags || ""}</div>
       <div class="signal">
@@ -352,16 +421,14 @@ const renderMatches = () => {
     button.addEventListener("click", () => {
       const scholarId = button.dataset.scholar;
       const mentorId = button.dataset.mentor;
-      assignMentor(scholarId, mentorId);
+      assignMentor(scholarId, mentorId, { source: "match-studio" });
     });
   });
 
   elements.matchList.querySelectorAll("button[data-unassign]").forEach((button) => {
     button.addEventListener("click", () => {
       const scholarId = button.dataset.unassign;
-      delete state.assignments[scholarId];
-      saveState();
-      renderAll();
+      unassignMentor(scholarId, { source: "match-studio" });
     });
   });
 };
@@ -493,6 +560,111 @@ const renderSignals = () => {
     </div>
   `;
   elements.signalBoard.appendChild(matchCard);
+};
+
+const renderQualityBoard = () => {
+  if (!elements.qualityBoard) return;
+  elements.qualityBoard.innerHTML = "";
+
+  if (!state.mentors.length || !state.scholars.length) {
+    elements.qualityBoard.innerHTML =
+      "<p>Add mentors and scholars to see match quality diagnostics.</p>";
+    return;
+  }
+
+  const assignedPairs = state.scholars
+    .filter((scholar) => state.assignments[scholar.id])
+    .map((scholar) => {
+      const mentor = getMentorById(state.assignments[scholar.id]);
+      if (!mentor) return null;
+      const scoredMentors = state.mentors
+        .map((candidate) => ({
+          mentor: candidate,
+          score: scoreMentor(candidate, scholar),
+        }))
+        .sort((a, b) => b.score - a.score);
+      const bestMatch = scoredMentors[0];
+      const assignedScore = scoreMentor(mentor, scholar);
+      return {
+        scholar,
+        mentor,
+        assignedScore,
+        bestScore: bestMatch ? bestMatch.score : assignedScore,
+        bestMentor: bestMatch ? bestMatch.mentor : mentor,
+        gap: bestMatch ? Math.max(bestMatch.score - assignedScore, 0) : 0,
+      };
+    })
+    .filter(Boolean);
+
+  if (!assignedPairs.length) {
+    elements.qualityBoard.innerHTML =
+      "<p>No assignments yet. Generate matches or auto-assign to see quality tiers.</p>";
+    return;
+  }
+
+  const averageScore = (
+    assignedPairs.reduce((sum, pair) => sum + pair.assignedScore, 0) / assignedPairs.length
+  ).toFixed(1);
+  const averageGap = (
+    assignedPairs.reduce((sum, pair) => sum + pair.gap, 0) / assignedPairs.length
+  ).toFixed(1);
+  const strongCount = assignedPairs.filter((pair) => pair.assignedScore >= 12).length;
+  const solidCount = assignedPairs.filter(
+    (pair) => pair.assignedScore >= 8 && pair.assignedScore < 12
+  ).length;
+  const riskCount = assignedPairs.filter((pair) => pair.assignedScore < 8).length;
+
+  const improvementGaps = assignedPairs
+    .filter((pair) => pair.gap >= 2 && pair.bestMentor?.id !== pair.mentor.id)
+    .sort((a, b) => b.gap - a.gap)
+    .slice(0, 4);
+
+  const summaryCard = document.createElement("div");
+  summaryCard.className = "card quality-card";
+  summaryCard.innerHTML = `
+    <div class="signal">
+      <strong>Assigned matches</strong>
+      <span>${assignedPairs.length} pairs · Avg score ${averageScore}</span>
+    </div>
+    <div class="signal">
+      <strong>Strength tiers</strong>
+      <span>Strong ${strongCount} · Solid ${solidCount} · At risk ${riskCount}</span>
+    </div>
+    <div class="signal">
+      <strong>Average gap to best fit</strong>
+      <span>${averageGap} points</span>
+    </div>
+  `;
+  elements.qualityBoard.appendChild(summaryCard);
+
+  const gapCard = document.createElement("div");
+  gapCard.className = "card quality-card";
+  gapCard.innerHTML = `
+    <div class="card-header">
+      <h3>Largest improvement gaps</h3>
+      <span class="badge">Top moves</span>
+    </div>
+    <div class="quality-gap">
+      ${
+        improvementGaps.length
+          ? improvementGaps
+              .map(
+                (pair) => `
+          <div class="quality-row">
+            <strong>${pair.scholar.name}</strong>
+            <span>Assigned to ${pair.mentor.name} · Best fit ${pair.bestMentor.name}</span>
+            <span class="muted">Gap ${pair.gap.toFixed(1)} pts · Current ${pair.assignedScore.toFixed(
+                  1
+                )}</span>
+          </div>
+        `
+              )
+              .join("")
+          : `<div class="quality-row">No major gaps detected. Current matches align with best-fit options.</div>`
+      }
+    </div>
+  `;
+  elements.qualityBoard.appendChild(gapCard);
 };
 
 const renderCohortBoard = () => {
@@ -942,6 +1114,146 @@ const renderActionQueue = () => {
   elements.actionQueue.appendChild(list);
 };
 
+const renderOpportunityBoard = () => {
+  if (!elements.opportunityBoard) return;
+  elements.opportunityBoard.innerHTML = "";
+
+  if (!state.mentors.length && !state.scholars.length) {
+    elements.opportunityBoard.innerHTML = "<p>Add mentors and scholars to see opportunities.</p>";
+    return;
+  }
+
+  if (!state.mentors.length) {
+    elements.opportunityBoard.innerHTML = "<p>Add mentors to surface open capacity.</p>";
+    return;
+  }
+
+  const unassignedScholars = state.scholars.filter(
+    (scholar) => !state.assignments[scholar.id]
+  );
+  if (!unassignedScholars.length) {
+    elements.opportunityBoard.innerHTML = "<p>All scholars are assigned. Keep mentoring steady.</p>";
+    return;
+  }
+
+  const mentorOpportunities = state.mentors
+    .map((mentor) => {
+      const capacityLeft = Math.max(getMentorCapacity(mentor) - getMentorLoadCount(mentor.id), 0);
+      const availability = getMentorAvailability(mentor);
+      const hoursLeft = availability
+        ? Math.max(availability - getMentorLoadHours(mentor.id), 0)
+        : "Open";
+      const eligible = unassignedScholars.filter((scholar) => {
+        if (capacityLeft <= 0) return false;
+        if (availability === 0) return true;
+        return getMentorLoadHours(mentor.id) + (scholar.intensity || 0) <= availability;
+      });
+      const matches = eligible
+        .map((scholar) => {
+          const overlap = (scholar.needs || []).filter((tag) =>
+            (mentor.tags || []).includes(tag)
+          ).length;
+          const timezoneAligned =
+            mentor.timezone && scholar.timezone && mentor.timezone === scholar.timezone;
+          return {
+            scholar,
+            score: scoreMentor(mentor, scholar),
+            overlap,
+            timezoneAligned,
+          };
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 2);
+
+      return {
+        mentor,
+        capacityLeft,
+        hoursLeft,
+        matches,
+      };
+    })
+    .filter((item) => item.capacityLeft > 0)
+    .sort((a, b) => {
+      if (b.matches.length !== a.matches.length) {
+        return b.matches.length - a.matches.length;
+      }
+      const hoursA = a.hoursLeft === "Open" ? 999 : a.hoursLeft;
+      const hoursB = b.hoursLeft === "Open" ? 999 : b.hoursLeft;
+      if (hoursB !== hoursA) return hoursB - hoursA;
+      return b.capacityLeft - a.capacityLeft;
+    })
+    .slice(0, 6);
+
+  if (!mentorOpportunities.length) {
+    elements.opportunityBoard.innerHTML =
+      "<p>No open mentor capacity to allocate right now.</p>";
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "list";
+
+  mentorOpportunities.forEach((item) => {
+    const utilization = getMentorUtilization(item.mentor);
+    const hoursLabel =
+      item.hoursLeft === "Open" ? "Open hours" : `${item.hoursLeft} hrs left`;
+
+    const card = document.createElement("div");
+    card.className = "card opportunity-card";
+    card.innerHTML = `
+      <div class="card-header">
+        <h3>${item.mentor.name}</h3>
+        <span class="badge">Open slots ${item.capacityLeft}</span>
+      </div>
+      <div class="signal">
+        <strong>${utilization}% utilized · ${hoursLabel}</strong>
+        <span>${item.mentor.role || "Mentor"} · ${item.mentor.timezone || "Timezone TBD"}</span>
+      </div>
+      <div class="opportunity-list">
+        ${
+          item.matches.length
+            ? item.matches
+                .map(
+                  (match) => `
+                  <div class="opportunity-row">
+                    <div>
+                      <strong>${match.scholar.name}</strong>
+                      <span class="muted">Score ${match.score.toFixed(1)} · ${
+                    match.overlap
+                  } overlap · Urgency ${match.scholar.urgency || 0} · ${
+                    match.timezoneAligned ? "Timezone aligned" : "Timezone mismatch"
+                  }</span>
+                    </div>
+                    <button class="ghost" data-opportunity-assign data-scholar="${
+                      match.scholar.id
+                    }" data-mentor="${item.mentor.id}">
+                      Assign
+                    </button>
+                  </div>
+                `
+                )
+                .join("")
+            : "<p class=\"muted\">No eligible unassigned scholars yet.</p>"
+        }
+      </div>
+    `;
+    list.appendChild(card);
+  });
+
+  elements.opportunityBoard.appendChild(list);
+
+  elements.opportunityBoard
+    .querySelectorAll("button[data-opportunity-assign]")
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        const scholarId = button.dataset.scholar;
+        const mentorId = button.dataset.mentor;
+        if (!scholarId || !mentorId) return;
+        assignMentor(scholarId, mentorId);
+      });
+    });
+};
+
 const renderCoverageBoard = () => {
   elements.coverageBoard.innerHTML = "";
 
@@ -1194,6 +1506,82 @@ const renderRecruitmentPlan = () => {
   elements.recruitmentPlan.appendChild(list);
 };
 
+const renderPipelineBoard = () => {
+  if (!elements.pipelineBoard) return;
+  elements.pipelineBoard.innerHTML = "";
+
+  if (!state.mentors.length) {
+    elements.pipelineBoard.innerHTML = "<p>Add mentors to see pipeline health.</p>";
+    return;
+  }
+
+  const stageCounts = state.mentors.reduce(
+    (acc, mentor) => {
+      const stage = normalizeStage(mentor.stage);
+      acc[stage] += 1;
+      return acc;
+    },
+    { invited: 0, onboarding: 0, active: 0, paused: 0 }
+  );
+  const total = state.mentors.length;
+  const activationRate = total ? Math.round((stageCounts.active / total) * 100) : 0;
+  const benchMentors = state.mentors.filter((mentor) => getMentorLoadCount(mentor.id) === 0);
+  const stalledOnboarding = state.mentors.filter(
+    (mentor) => normalizeStage(mentor.stage) !== "active" && getMentorLoadCount(mentor.id) === 0
+  );
+
+  const summaryCard = document.createElement("div");
+  summaryCard.className = "card pipeline-card";
+  summaryCard.innerHTML = `
+    <div class="signal">
+      <strong>Activation rate</strong>
+      <span>${stageCounts.active}/${total} active · ${activationRate}%</span>
+    </div>
+    <div class="signal">
+      <strong>Bench mentors</strong>
+      <span>${benchMentors.length} without scholars assigned</span>
+    </div>
+    <div class="signal">
+      <strong>Pipeline backlog</strong>
+      <span>${stageCounts.invited} invited · ${stageCounts.onboarding} onboarding</span>
+    </div>
+  `;
+
+  const actionCard = document.createElement("div");
+  actionCard.className = "card pipeline-card";
+  const benchNames = benchMentors.slice(0, 4).map((mentor) => mentor.name).join(", ");
+  const stalledNames = stalledOnboarding.slice(0, 4).map((mentor) => mentor.name).join(", ");
+  const followUps = [
+    stalledOnboarding.length
+      ? `Finish onboarding: ${stalledNames}${stalledOnboarding.length > 4 ? "…" : ""}`
+      : null,
+    benchMentors.length
+      ? `Assign first scholar to: ${benchNames}${benchMentors.length > 4 ? "…" : ""}`
+      : null,
+    stageCounts.paused ? `${stageCounts.paused} paused mentor(s) to re-engage.` : null,
+  ].filter(Boolean);
+
+  actionCard.innerHTML = `
+    <div class="card-header">
+      <h3>Activation follow-ups</h3>
+      <span class="badge">Pipeline</span>
+    </div>
+    <div class="pipeline-actions">
+      ${
+        followUps.length
+          ? followUps.map((item) => `<p>${item}</p>`).join("")
+          : "<p class=\"muted\">Pipeline stable. Keep mentors warm with monthly check-ins.</p>"
+      }
+    </div>
+  `;
+
+  const list = document.createElement("div");
+  list.className = "list";
+  list.appendChild(summaryCard);
+  list.appendChild(actionCard);
+  elements.pipelineBoard.appendChild(list);
+};
+
 const getBackupMentors = (scholar, currentMentorId) => {
   const needs = scholar.needs || [];
   return state.mentors
@@ -1425,6 +1813,149 @@ const renderDependencyBoard = () => {
   elements.dependencyBoard.appendChild(list);
 };
 
+const renderContinuityPlaybook = () => {
+  if (!elements.continuityPlaybook) return;
+  elements.continuityPlaybook.innerHTML = "";
+
+  if (!state.mentors.length && !state.scholars.length) {
+    elements.continuityPlaybook.innerHTML =
+      "<p>Add mentors and scholars to surface continuity coverage.</p>";
+    return;
+  }
+
+  const assignedScholars = state.scholars.filter((scholar) => state.assignments[scholar.id]);
+  if (!assignedScholars.length) {
+    elements.continuityPlaybook.innerHTML =
+      "<p>Assign scholars to mentors to see continuity planning suggestions.</p>";
+    return;
+  }
+
+  const riskProfiles = assignedScholars.map((scholar) => {
+    const mentorId = state.assignments[scholar.id];
+    const mentor = getMentorById(mentorId);
+    const backups = getBackupMentors(scholar, mentorId);
+    const backupCount = backups.length;
+    const status = backupCount === 0 ? "critical" : backupCount === 1 ? "watch" : "stable";
+    const riskScore =
+      (backupCount === 0 ? 100 : backupCount === 1 ? 60 : 20) +
+      (scholar.urgency || 0) * 8 +
+      (scholar.intensity || 0) * 4;
+    const topBackups = backups.slice(0, 2).map(({ mentor: backupMentor }) => backupMentor);
+
+    return {
+      scholar,
+      mentor,
+      backupCount,
+      backups,
+      topBackups,
+      status,
+      riskScore,
+    };
+  });
+
+  const noBackup = riskProfiles.filter((profile) => profile.backupCount === 0);
+  const thinBackup = riskProfiles.filter((profile) => profile.backupCount === 1);
+  const focusNeeds = riskProfiles.reduce((acc, profile) => {
+    if (profile.backupCount > 1) return acc;
+    (profile.scholar.needs || []).forEach((need) => {
+      acc[need] = (acc[need] || 0) + 1;
+    });
+    return acc;
+  }, {});
+  const topNeeds = Object.entries(focusNeeds)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([need, count]) => `${need} (${count})`)
+    .join(", ");
+
+  const mentorRiskCounts = riskProfiles.reduce((acc, profile) => {
+    if (profile.backupCount > 1) return acc;
+    const mentorName = profile.mentor?.name || "Unassigned mentor";
+    acc[mentorName] = (acc[mentorName] || 0) + 1;
+    return acc;
+  }, {});
+  const mentorHotspots = Object.entries(mentorRiskCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([mentorName, count]) => `${mentorName} (${count})`)
+    .join(", ");
+
+  const summaryCard = document.createElement("div");
+  summaryCard.className = "card continuity-card";
+  summaryCard.innerHTML = `
+    <div class="signal">
+      <strong>No-backup scholars</strong>
+      <span>${noBackup.length} currently without a secondary mentor</span>
+    </div>
+    <div class="signal">
+      <strong>Thin coverage</strong>
+      <span>${thinBackup.length} scholars with only one backup option</span>
+    </div>
+    <div class="signal">
+      <strong>Continuity hotspots</strong>
+      <span>${mentorHotspots || "No mentor has concentrated backup risk."}</span>
+    </div>
+    <div class="signal">
+      <strong>Recruitment focus</strong>
+      <span>${topNeeds || "No immediate backup gaps detected."}</span>
+    </div>
+  `;
+
+  const list = document.createElement("div");
+  list.className = "list";
+  list.appendChild(summaryCard);
+
+  riskProfiles
+    .sort((a, b) => b.riskScore - a.riskScore)
+    .slice(0, 6)
+    .forEach((profile) => {
+      const backupText = profile.topBackups.length
+        ? profile.topBackups.map((backup) => backup.name).join(", ")
+        : "Recruit a backup mentor";
+      const overlapText = profile.topBackups.length
+        ? profile.topBackups
+            .map((backup) => {
+              const overlap = (profile.scholar.needs || []).filter((need) =>
+                (backup.tags || []).includes(need)
+              ).length;
+              return `${backup.name} (${overlap} overlap)`;
+            })
+            .join(", ")
+        : "No eligible backups meet needs + capacity.";
+
+      const card = document.createElement("div");
+      card.className = "card continuity-card";
+      card.innerHTML = `
+        <div class="card-header">
+          <h3>${profile.scholar.name}</h3>
+          <span class="badge badge-criticality is-${profile.status}">
+            ${profile.status === "critical" ? "No backup" : profile.status === "watch" ? "Thin" : "Covered"}
+          </span>
+        </div>
+        <p class="muted">${profile.scholar.cohort || "Cohort TBD"} · ${
+        profile.scholar.timezone || "Timezone TBD"
+      } · ${profile.scholar.intensity || 0} hrs/week</p>
+        <div class="signal">
+          <strong>Primary mentor</strong>
+          <span>${profile.mentor?.name || "Unassigned"} · ${
+        profile.mentor?.role || "Mentor"
+      }</span>
+        </div>
+        <div class="signal">
+          <strong>Backup options</strong>
+          <span>${backupText}</span>
+        </div>
+        <div class="signal">
+          <strong>Fit highlights</strong>
+          <span>${overlapText}</span>
+        </div>
+      `;
+      list.appendChild(card);
+    });
+
+  elements.continuityPlaybook.appendChild(list);
+};
+
 const findReassignmentOptions = (scholar, currentMentorId) =>
   state.mentors
     .filter((mentor) => mentor.id !== currentMentorId)
@@ -1541,7 +2072,7 @@ const renderRebalanceBoard = () => {
       const scholarId = button.dataset.scholar;
       const mentorId = button.dataset.mentor;
       if (!scholarId || !mentorId) return;
-      assignMentor(scholarId, mentorId);
+      assignMentor(scholarId, mentorId, { source: "rebalance-studio" });
     });
   });
 };
@@ -1569,6 +2100,52 @@ const renderMetrics = () => {
       <strong>${fairnessMetric()}</strong>
     </div>
   `;
+};
+
+const formatActivityTime = (timestamp) => {
+  if (!timestamp) return "Unknown time";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "Unknown time";
+  return date.toLocaleString();
+};
+
+const renderActivityLog = () => {
+  if (!elements.activityLog) return;
+  elements.activityLog.innerHTML = "";
+  if (!state.activityLog.length) {
+    elements.activityLog.innerHTML = "<p>No decisions logged yet.</p>";
+    return;
+  }
+
+  state.activityLog.slice(0, 8).forEach((entry) => {
+    const scholar = entry.scholarId ? getScholarById(entry.scholarId) : null;
+    const mentor = entry.mentorId ? getMentorById(entry.mentorId) : null;
+    const previousMentor = entry.previousMentorId ? getMentorById(entry.previousMentorId) : null;
+    const contextBits = [];
+    if (scholar) contextBits.push(`Scholar: ${scholar.name}`);
+    if (mentor) contextBits.push(`Mentor: ${mentor.name}`);
+    if (previousMentor && previousMentor.id !== mentor?.id) {
+      contextBits.push(`From: ${previousMentor.name}`);
+    }
+    if (entry.owner) contextBits.push(`Owner: ${entry.owner}`);
+
+    const item = document.createElement("div");
+    item.className = "activity-item";
+    item.innerHTML = `
+      <div class="activity-meta">
+        <span class="activity-type">${entry.type}</span>
+        <span>${formatActivityTime(entry.timestamp)}</span>
+      </div>
+      <strong>${entry.summary}</strong>
+      ${entry.detail ? `<span class="activity-detail">${entry.detail}</span>` : ""}
+      ${
+        contextBits.length
+          ? `<span class="activity-detail">${contextBits.join(" · ")}</span>`
+          : ""
+      }
+    `;
+    elements.activityLog.appendChild(item);
+  });
 };
 
 const renderPreview = () => {
@@ -1647,20 +2224,71 @@ const renderAll = () => {
   renderScholars();
   renderMatches();
   renderSignals();
+  renderQualityBoard();
   renderCohortBoard();
   renderEngagementPlan();
   renderRiskRadar();
   renderActionQueue();
+  renderOpportunityBoard();
   renderDependencyBoard();
+  renderContinuityPlaybook();
   renderCoverageBoard();
   renderRecruitmentPlan();
   renderRebalanceBoard();
+  renderActivityLog();
   renderMetrics();
   renderPreview();
 };
 
-const assignMentor = (scholarId, mentorId) => {
+const addActivityEntry = (entry) => {
+  const normalized = normalizeActivityEntry({
+    ...entry,
+    timestamp: entry?.timestamp || new Date().toISOString(),
+  });
+  state.activityLog = [normalized, ...state.activityLog].slice(0, 60);
+};
+
+const assignMentor = (scholarId, mentorId, options = {}) => {
+  const previousMentorId = state.assignments[scholarId];
+  if (previousMentorId === mentorId) return;
   state.assignments[scholarId] = mentorId;
+  const scholar = getScholarById(scholarId);
+  const mentor = getMentorById(mentorId);
+  const previousMentor = previousMentorId ? getMentorById(previousMentorId) : null;
+  const type = previousMentorId ? "reassign" : "assign";
+  const summary = previousMentorId
+    ? `Reassigned ${scholar?.name || "scholar"}`
+    : `Assigned ${scholar?.name || "scholar"}`;
+  const detail = previousMentorId
+    ? `Moved from ${previousMentor?.name || "previous mentor"} to ${mentor?.name || "mentor"}.`
+    : `Matched with ${mentor?.name || "mentor"}.`;
+  addActivityEntry({
+    type,
+    summary,
+    detail,
+    scholarId,
+    mentorId,
+    previousMentorId,
+    source: options.source || "manual",
+  });
+  saveState();
+  renderAll();
+};
+
+const unassignMentor = (scholarId, options = {}) => {
+  const previousMentorId = state.assignments[scholarId];
+  if (!previousMentorId) return;
+  delete state.assignments[scholarId];
+  const scholar = getScholarById(scholarId);
+  const mentor = getMentorById(previousMentorId);
+  addActivityEntry({
+    type: "unassign",
+    summary: `Unassigned ${scholar?.name || "scholar"}`,
+    detail: mentor ? `Removed ${mentor.name} from assignment.` : "",
+    scholarId,
+    mentorId: previousMentorId,
+    source: options.source || "manual",
+  });
   saveState();
   renderAll();
 };

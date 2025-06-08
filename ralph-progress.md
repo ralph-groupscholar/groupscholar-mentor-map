@@ -71,3 +71,8 @@
 - Added a scholar risk radar with score-based alerts, reasons, and next-action guidance.
 - Highlighted mentor load, urgency, intensity, and coverage gaps in the new risk cards.
 - Wired the risk radar into the main dashboard render flow.
+
+## Iteration 88
+- Added a match quality diagnostics panel with strength tiers and average gap-to-best-fit metrics.
+- Surfaced the largest assignment improvement gaps with assigned vs best-fit mentor comparisons.
+- Styled the quality diagnostics cards to match the existing dashboard system.
